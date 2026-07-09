@@ -52,7 +52,7 @@ COLOR_TEXTURE_EXCLUDE_HINTS = (
     "fabric",
     "leather",
 )
-PAINT_COLOR = (0.84, 0.85, 0.84, 1.0)
+PAINT_COLOR = (0.30, 0.31, 0.30, 1.0)
 GREEN_SCREEN_COLOR = (0.0, 1.0, 0.0)
 
 
@@ -339,6 +339,40 @@ def material_has_fallback_texture(material_obj):
         if node.bl_idname != "ShaderNodeTexImage":
             continue
         if image_is_generated_fallback(getattr(node, "image", None)):
+            return True
+    return False
+
+
+def material_has_renderer_color_texture(material_obj):
+    if not material_obj or not material_obj.use_nodes or not material_obj.node_tree:
+        return False
+    for node in material_obj.node_tree.nodes:
+        if node.bl_idname != "ShaderNodeTexImage":
+            continue
+        if node.name == "vehicle_renderer_livery_texture":
+            image = getattr(node, "image", None)
+            return bool(image and not image_is_generated_fallback(image))
+    return False
+
+
+def material_uses_generic_tiny_texture(material_obj, names):
+    if not material_obj or not material_obj.use_nodes or not material_obj.node_tree:
+        return False
+    normalized_names = {normalized_texture_name(name) for name in names}
+    for node in material_obj.node_tree.nodes:
+        if node.bl_idname != "ShaderNodeTexImage":
+            continue
+        image = getattr(node, "image", None)
+        if not image:
+            continue
+        image_name = normalized_texture_name(image.name)
+        if image_name not in normalized_names:
+            continue
+        try:
+            width, height = image.size
+            if max(width, height) <= 8:
+                return True
+        except Exception:
             return True
     return False
 
@@ -854,6 +888,17 @@ def semantic_color(name, semantic):
     return None
 
 
+def is_catalog_paint_slot(name):
+    key = normalized_texture_name(name)
+    lower = name.lower()
+    return (
+        "primary" in lower
+        or "secondary" in lower
+        or "vehicle_generic_smallspecmap" in key
+        or key in {"paint", "body", "bodyshell", "vehicle_body", "vehpaint"}
+    )
+
+
 def tune_semantic_materials():
     changed = 0
     for material_obj in bpy.data.materials:
@@ -877,16 +922,36 @@ def tune_semantic_materials():
                 set_input(node, "Metallic", 0.35)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.55)
             elif semantic == "chrome":
-                set_input(node, "Roughness", 0.08)
-                set_input(node, "Metallic", 1.0)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.9)
-                set_input(node, "Coat Weight", 0.45)
+                if material_uses_generic_tiny_texture(material_obj, ("chrome", "vehicle_generic_smallspecmap")):
+                    chrome_fallback = (0.26, 0.27, 0.26, 1.0)
+                    force_input(node, "Base Color", chrome_fallback)
+                    material_obj.diffuse_color = chrome_fallback
+                    force_input(node, "Roughness", 0.50)
+                    force_input(node, "Metallic", 0.04)
+                    force_input(node, "Specular IOR Level", 0.34)
+                    force_input(node, "Specular", 0.34)
+                    force_input(node, "Coat Weight", 0.06)
+                    force_input(node, "Coat Roughness", 0.26)
+                else:
+                    set_input(node, "Roughness", 0.08)
+                    set_input(node, "Metallic", 0.85)
+                    set_first_input(node, ("Specular IOR Level", "Specular"), 0.82)
+                    set_input(node, "Coat Weight", 0.35)
             elif semantic == "paint":
-                set_input(node, "Roughness", 0.18)
+                if is_catalog_paint_slot(material_obj.name) and not material_has_renderer_color_texture(material_obj):
+                    force_input(node, "Base Color", PAINT_COLOR)
+                    material_obj.diffuse_color = PAINT_COLOR
+                    force_input(node, "Roughness", 0.42)
+                    force_input(node, "Specular IOR Level", 0.42)
+                    force_input(node, "Specular", 0.42)
+                    force_input(node, "Coat Weight", 0.22)
+                    force_input(node, "Coat Roughness", 0.20)
+                else:
+                    set_input(node, "Roughness", 0.28)
+                    set_first_input(node, ("Specular IOR Level", "Specular"), 0.64)
+                    set_input(node, "Coat Weight", 0.42)
+                    set_input(node, "Coat Roughness", 0.14)
                 set_input(node, "Metallic", 0.0)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.82)
-                set_input(node, "Coat Weight", 0.82)
-                set_input(node, "Coat Roughness", 0.055)
             elif semantic == "metal":
                 set_input(node, "Roughness", 0.28)
                 set_input(node, "Metallic", 0.72)

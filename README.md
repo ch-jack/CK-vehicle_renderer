@@ -100,7 +100,7 @@ python ".\[Tool]\vehicle_renderer\render_all_vehicles.py" "D:\cars" --workers 2 
 `--cutout` 默认已经使用偏亮的 studio 灯光。需要微调时：
 
 ```powershell
-python ".\[Tool]\vehicle_renderer\render_all_vehicles.py" "D:\cars" --cutout --exposure 0.75 --world-strength 0.78 --light-scale 1.85
+python ".\[Tool]\vehicle_renderer\render_all_vehicles.py" "D:\cars" --cutout --exposure 0.35 --world-strength 0.66 --light-scale 1.45
 ```
 
 关闭自动解包：

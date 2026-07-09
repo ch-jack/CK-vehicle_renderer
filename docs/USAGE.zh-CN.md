@@ -147,7 +147,7 @@ python ".\[Tool]\vehicle_renderer\render_all_vehicles.py" "D:\cars" --yaw 135 --
 `--cutout` 默认已经使用偏亮 studio 灯光。需要微调曝光和灯光：
 
 ```powershell
-python ".\[Tool]\vehicle_renderer\render_all_vehicles.py" "D:\cars" --cutout --exposure 0.75 --world-strength 0.78 --light-scale 1.85
+python ".\[Tool]\vehicle_renderer\render_all_vehicles.py" "D:\cars" --cutout --exposure 0.35 --world-strength 0.66 --light-scale 1.45
 ```
 
 降低地面，避免轮子被平面挡住：

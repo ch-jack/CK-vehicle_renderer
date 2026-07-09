@@ -580,11 +580,11 @@ def run_green_key(blender: Path, args) -> int:
 
 def apply_render_defaults(args) -> None:
     if args.exposure is None:
-        args.exposure = 0.75 if args.cutout else -0.2
+        args.exposure = 0.35 if args.cutout else -0.2
     if args.world_strength is None:
-        args.world_strength = 0.78 if args.cutout else 0.45
+        args.world_strength = 0.66 if args.cutout else 0.45
     if args.light_scale is None:
-        args.light_scale = 1.85 if args.cutout else 0.72
+        args.light_scale = 1.45 if args.cutout else 0.72
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -607,19 +607,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--exposure",
         type=float,
         default=None,
-        help="Render exposure. Default: 0.75 with --cutout, otherwise -0.2.",
+        help="Render exposure. Default: 0.35 with --cutout, otherwise -0.2.",
     )
     parser.add_argument(
         "--world-strength",
         type=float,
         default=None,
-        help="White world light strength. Default: 0.78 with --cutout, otherwise 0.45.",
+        help="White world light strength. Default: 0.66 with --cutout, otherwise 0.45.",
     )
     parser.add_argument(
         "--light-scale",
         type=float,
         default=None,
-        help="Multiplier for all area lights. Default: 1.85 with --cutout, otherwise 0.72.",
+        help="Multiplier for all area lights. Default: 1.45 with --cutout, otherwise 0.72.",
     )
     parser.add_argument("--floor-gap", type=float, default=0.12, help="Lower the floor below visible bounds to avoid wheel clipping.")
     parser.add_argument("--cutout", action="store_true", help="Render green screen and output transparent cropped PNG.")
