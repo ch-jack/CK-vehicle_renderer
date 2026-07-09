@@ -1,6 +1,6 @@
 # 使用文档
 
-作者：JACK  
+作者：JACK
 联系方式：QQ 2518926462
 
 ## 1. 工具目标
@@ -20,11 +20,11 @@
 
 ### 车辆示例
 
-| 模型 | 白底样图 | 透明裁切 PNG |
-| --- | --- | --- |
-| fordc72 | ![fordc72 white](images/vehicle_fordc72_white.png) | ![fordc72 cutout](images/vehicle_fordc72_cutout.png) |
-| 10ttrsscpd | ![10ttrsscpd white](images/vehicle_10ttrsscpd_white.png) | ![10ttrsscpd cutout](images/vehicle_10ttrsscpd_cutout.png) |
-| zondarevob | ![zondarevob white](images/vehicle_zondarevob_white.png) | ![zondarevob cutout](images/vehicle_zondarevob_cutout.png) |
+| 模型 | 默认灰模 | 灰模 PNG | 黑模 | 黑模 PNG | 白模 | 白模 PNG | 绿幕 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 16MANDBS111 | ![16MANDBS111 gray model](images/vehicle_16MANDBS111_gray_model.png) | ![16MANDBS111 gray png](images/vehicle_16MANDBS111_gray_png.png) | ![16MANDBS111 black model](images/vehicle_16MANDBS111_black_model.png) | ![16MANDBS111 black png](images/vehicle_16MANDBS111_black_png.png) | ![16MANDBS111 white model](images/vehicle_16MANDBS111_white_model.png) | ![16MANDBS111 white png](images/vehicle_16MANDBS111_white_png.png) | ![16MANDBS111 greenscreen](images/vehicle_16MANDBS111_greenscreen.png) |
+| fordc72 | ![fordc72 gray model](images/vehicle_fordc72_gray_model.png) | ![fordc72 gray png](images/vehicle_fordc72_gray_png.png) | ![fordc72 black model](images/vehicle_fordc72_black_model.png) | ![fordc72 black png](images/vehicle_fordc72_black_png.png) | ![fordc72 white model](images/vehicle_fordc72_white_model.png) | ![fordc72 white png](images/vehicle_fordc72_white_png.png) | ![fordc72 greenscreen](images/vehicle_fordc72_greenscreen.png) |
+| zondarevob | ![zondarevob gray model](images/vehicle_zondarevob_gray_model.png) | ![zondarevob gray png](images/vehicle_zondarevob_gray_png.png) | ![zondarevob black model](images/vehicle_zondarevob_black_model.png) | ![zondarevob black png](images/vehicle_zondarevob_black_png.png) | ![zondarevob white model](images/vehicle_zondarevob_white_model.png) | ![zondarevob white png](images/vehicle_zondarevob_white_png.png) | ![zondarevob greenscreen](images/vehicle_zondarevob_greenscreen.png) |
 
 ### 武器示例
 

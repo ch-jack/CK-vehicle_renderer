@@ -17,6 +17,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 TOOLS_DIR = SCRIPT_DIR / "tools"
 INNER_SCRIPT = SCRIPT_DIR / "blender_render_vehicle.py"
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z"}
+LEGACY_VEHICLE_BLACK_CUTOUT_EXPOSURE = 0.35
+LEGACY_VEHICLE_BLACK_CUTOUT_WORLD_STRENGTH = 0.66
+LEGACY_VEHICLE_BLACK_CUTOUT_LIGHT_SCALE = 1.45
+LEGACY_VEHICLE_BLACK_CUTOUT_KEY_PADDING = 12
 
 
 @dataclass(frozen=True)
@@ -589,13 +593,23 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
     exposure = args.exposure
     world_strength = args.world_strength
     light_scale = args.light_scale
+    key_padding = args.key_padding
+    if args.cutout and asset_kind == "vehicle" and args.model_tone == "black":
+        if args.exposure_auto:
+            exposure = LEGACY_VEHICLE_BLACK_CUTOUT_EXPOSURE
+        if args.world_strength_auto:
+            world_strength = LEGACY_VEHICLE_BLACK_CUTOUT_WORLD_STRENGTH
+        if args.light_scale_auto:
+            light_scale = LEGACY_VEHICLE_BLACK_CUTOUT_LIGHT_SCALE
+        if key_padding == 0:
+            key_padding = LEGACY_VEHICLE_BLACK_CUTOUT_KEY_PADDING
     if args.cutout and asset_kind != "vehicle":
         if args.exposure_auto:
-            exposure = 0.05
+            exposure = -0.08
         if args.world_strength_auto:
-            world_strength = 0.48
+            world_strength = 0.40
         if args.light_scale_auto:
-            light_scale = 1.05
+            light_scale = 0.90
     if args.cutout:
         output_path = out_dir / "_alpha" / f"{model}.png"
         green_screen_path = out_dir / "_greenscreen" / f"{model}.png"
@@ -630,7 +644,7 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
         "cutout_path": str(final_output_path.resolve()) if args.cutout else "",
         "green_screen": args.cutout,
         "key_threshold": args.key_threshold,
-        "key_padding": args.key_padding,
+        "key_padding": key_padding,
         "width": args.width,
         "height": args.height,
         "samples": args.samples,
@@ -861,19 +875,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--exposure",
         type=float,
         default=None,
-        help="Render exposure. Default: 0.35 with --cutout, otherwise -0.2.",
+        help="Render exposure. Default: 0.16 with --cutout, otherwise -0.2. Vehicle black cutout compatibility uses 0.35.",
     )
     parser.add_argument(
         "--world-strength",
         type=float,
         default=None,
-        help="White world light strength. Default: 0.66 with --cutout, otherwise 0.45.",
+        help="White world light strength. Default: 0.56 with --cutout, otherwise 0.45. Vehicle black cutout compatibility uses 0.66.",
     )
     parser.add_argument(
         "--light-scale",
         type=float,
         default=None,
-        help="Multiplier for all area lights. Default: 1.45 with --cutout, otherwise 0.72.",
+        help="Multiplier for all area lights. Default: 1.18 with --cutout, otherwise 0.72. Vehicle black cutout compatibility uses 1.45.",
     )
     parser.add_argument("--floor-gap", type=float, default=0.12, help="Lower the floor below visible bounds to avoid wheel clipping.")
     parser.add_argument("--cutout", action="store_true", help="Render green screen and output transparent cropped PNG.")

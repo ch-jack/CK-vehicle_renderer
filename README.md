@@ -1,6 +1,6 @@
 # Vehicle Renderer
 
-作者：JACK  
+作者：JACK
 联系方式：QQ 2518926462
 
 基于 Blender、Sollumz 和 CodeWalker 运行工具的 FiveM/GTA V 资源批量渲染器。指定一个资源目录后，工具会自动解包 `.zip` / `.rar` / `.7z` / `.rpf`，提取 `.ytd` 贴图，导入模型并输出 PNG 图片。
@@ -11,11 +11,11 @@
 
 ### 车辆示例
 
-| 模型 | 白底样图 | 透明裁切 PNG |
-| --- | --- | --- |
-| fordc72 | ![fordc72 white](docs/images/vehicle_fordc72_white.png) | ![fordc72 cutout](docs/images/vehicle_fordc72_cutout.png) |
-| 10ttrsscpd | ![10ttrsscpd white](docs/images/vehicle_10ttrsscpd_white.png) | ![10ttrsscpd cutout](docs/images/vehicle_10ttrsscpd_cutout.png) |
-| zondarevob | ![zondarevob white](docs/images/vehicle_zondarevob_white.png) | ![zondarevob cutout](docs/images/vehicle_zondarevob_cutout.png) |
+| 模型 | 默认灰模 | 灰模 PNG | 黑模 | 黑模 PNG | 白模 | 白模 PNG | 绿幕 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 16MANDBS111 | ![16MANDBS111 gray model](docs/images/vehicle_16MANDBS111_gray_model.png) | ![16MANDBS111 gray png](docs/images/vehicle_16MANDBS111_gray_png.png) | ![16MANDBS111 black model](docs/images/vehicle_16MANDBS111_black_model.png) | ![16MANDBS111 black png](docs/images/vehicle_16MANDBS111_black_png.png) | ![16MANDBS111 white model](docs/images/vehicle_16MANDBS111_white_model.png) | ![16MANDBS111 white png](docs/images/vehicle_16MANDBS111_white_png.png) | ![16MANDBS111 greenscreen](docs/images/vehicle_16MANDBS111_greenscreen.png) |
+| fordc72 | ![fordc72 gray model](docs/images/vehicle_fordc72_gray_model.png) | ![fordc72 gray png](docs/images/vehicle_fordc72_gray_png.png) | ![fordc72 black model](docs/images/vehicle_fordc72_black_model.png) | ![fordc72 black png](docs/images/vehicle_fordc72_black_png.png) | ![fordc72 white model](docs/images/vehicle_fordc72_white_model.png) | ![fordc72 white png](docs/images/vehicle_fordc72_white_png.png) | ![fordc72 greenscreen](docs/images/vehicle_fordc72_greenscreen.png) |
+| zondarevob | ![zondarevob gray model](docs/images/vehicle_zondarevob_gray_model.png) | ![zondarevob gray png](docs/images/vehicle_zondarevob_gray_png.png) | ![zondarevob black model](docs/images/vehicle_zondarevob_black_model.png) | ![zondarevob black png](docs/images/vehicle_zondarevob_black_png.png) | ![zondarevob white model](docs/images/vehicle_zondarevob_white_model.png) | ![zondarevob white png](docs/images/vehicle_zondarevob_white_png.png) | ![zondarevob greenscreen](docs/images/vehicle_zondarevob_greenscreen.png) |
 
 ### 武器示例
 
