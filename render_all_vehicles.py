@@ -895,7 +895,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--model-tone",
         choices=("gray", "white", "black"),
         default="gray",
-        help="Vehicle paint tone. Gray/white use native paint layers; black keeps legacy texture-detail shading.",
+        help="Vehicle paint tone. All tones use native primary, secondary and pearlescent paint layers.",
     )
     parser.add_argument("--no-special-lights", action="store_true", help="Disable police/self-emissive material emission tuning.")
     parser.add_argument("--key-green", default="", help="Standalone green-screen PNG file/folder to key and crop.")
