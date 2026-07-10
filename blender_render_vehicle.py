@@ -52,14 +52,14 @@ COLOR_TEXTURE_EXCLUDE_HINTS = (
     "fabric",
     "leather",
 )
-PAINT_COLOR = (0.045, 0.045, 0.04, 1.0)
+PAINT_COLOR = (0.002, 0.002, 0.0015, 1.0)
 CHROME_FALLBACK_COLOR = (0.26, 0.27, 0.26, 1.0)
 MODEL_TONE = "black"
 ASSET_KIND = "vehicle"
 MODEL_TONE_PALETTE = {
     "gray": ((0.12, 0.13, 0.12, 1.0), (0.26, 0.27, 0.26, 1.0)),
     "white": ((0.62, 0.64, 0.61, 1.0), (0.26, 0.27, 0.26, 1.0)),
-    "black": ((0.045, 0.045, 0.04, 1.0), (0.26, 0.27, 0.26, 1.0)),
+    "black": ((0.002, 0.002, 0.0015, 1.0), (0.26, 0.27, 0.26, 1.0)),
 }
 VEHICLE_BODY_PAINT_LAYERS = {1, 2, 3}
 GREEN_SCREEN_COLOR = (0.0, 1.0, 0.0)
@@ -779,8 +779,10 @@ def apply_vehicle_paint_tones():
         paint_layer = vehicle_material_paint_layer(material_obj)
         updated = False
         if paint_layer in VEHICLE_BODY_PAINT_LAYERS:
-            layer_node = nodes.get(f"PreviewBodyColor{paint_layer}")
-            if layer_node is not None and len(layer_node.inputs) >= 3:
+            for layer in range(1, 8):
+                layer_node = nodes.get(f"PreviewBodyColor{layer}")
+                if layer_node is None or len(layer_node.inputs) < 3:
+                    continue
                 for index, component in enumerate(color[:3]):
                     layer_node.inputs[index].default_value = component
                 updated = True
@@ -1352,7 +1354,10 @@ def tune_semantic_materials(enable_emission=True):
     changed = 0
     for material_obj in bpy.data.materials:
         semantic = material_semantic(material_obj.name)
-        if not semantic or semantic == "glass":
+        native_paint = vehicle_material_uses_paint_tone(material_obj)
+        if not semantic and not native_paint:
+            continue
+        if semantic == "glass" and not native_paint:
             continue
         material_obj.use_nodes = True
         color = semantic_color(material_obj.name, semantic)
@@ -1360,18 +1365,19 @@ def tune_semantic_materials(enable_emission=True):
             if node.bl_idname != "ShaderNodeBsdfPrincipled":
                 continue
             model_toned = apply_untextured_model_tone(material_obj, node)
-            if not model_toned and semantic != "light" and color and not base_color_has_upstream_texture(node):
+            surface_semantic = "paint" if model_toned else semantic
+            if not model_toned and surface_semantic != "light" and color and not base_color_has_upstream_texture(node):
                 force_input(node, "Base Color", color)
                 material_obj.diffuse_color = color
-            if semantic == "rubber":
+            if surface_semantic == "rubber":
                 set_input(node, "Roughness", 0.78)
                 set_input(node, "Metallic", 0.0)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.32)
-            elif semantic == "brake":
+            elif surface_semantic == "brake":
                 set_input(node, "Roughness", 0.48)
                 set_input(node, "Metallic", 0.35)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.55)
-            elif semantic == "chrome":
+            elif surface_semantic == "chrome":
                 if not model_toned and material_uses_generic_tiny_texture(material_obj, ("chrome", "vehicle_generic_smallspecmap")):
                     chrome_fallback = CHROME_FALLBACK_COLOR
                     force_input(node, "Base Color", chrome_fallback)
@@ -1387,7 +1393,7 @@ def tune_semantic_materials(enable_emission=True):
                     set_input(node, "Metallic", 0.85)
                     set_first_input(node, ("Specular IOR Level", "Specular"), 0.82)
                     set_input(node, "Coat Weight", 0.35)
-            elif semantic == "paint":
+            elif surface_semantic == "paint":
                 if not model_toned and is_catalog_paint_slot(material_obj.name) and not material_has_renderer_color_texture(material_obj):
                     force_input(node, "Base Color", PAINT_COLOR)
                     material_obj.diffuse_color = PAINT_COLOR
@@ -1396,28 +1402,34 @@ def tune_semantic_materials(enable_emission=True):
                     force_input(node, "Specular", 0.42)
                     force_input(node, "Coat Weight", 0.22)
                     force_input(node, "Coat Roughness", 0.20)
+                elif model_toned and MODEL_TONE == "black":
+                    force_input(node, "Roughness", 0.22)
+                    force_input(node, "Specular IOR Level", 0.08)
+                    force_input(node, "Specular", 0.08)
+                    force_input(node, "Coat Weight", 0.04)
+                    force_input(node, "Coat Roughness", 0.18)
                 else:
                     set_input(node, "Roughness", 0.28)
                     set_first_input(node, ("Specular IOR Level", "Specular"), 0.64)
                     set_input(node, "Coat Weight", 0.42)
                     set_input(node, "Coat Roughness", 0.14)
                 set_input(node, "Metallic", 0.0)
-            elif semantic == "metal":
+            elif surface_semantic == "metal":
                 set_input(node, "Roughness", 0.28)
                 set_input(node, "Metallic", 0.72)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.72)
                 set_input(node, "Coat Weight", 0.25)
-            elif semantic == "carbon":
+            elif surface_semantic == "carbon":
                 set_input(node, "Roughness", 0.24)
                 set_input(node, "Metallic", 0.0)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.75)
                 set_input(node, "Coat Weight", 0.65)
                 set_input(node, "Coat Roughness", 0.08)
-            elif semantic in ("plastic", "leather", "fabric"):
+            elif surface_semantic in ("plastic", "leather", "fabric"):
                 set_input(node, "Roughness", 0.52 if semantic == "plastic" else 0.72)
                 set_input(node, "Metallic", 0.0)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.42)
-            elif semantic == "light":
+            elif surface_semantic == "light":
                 light_color = current_material_color(material_obj, node)
                 if enable_emission and should_emit_material(material_obj.name):
                     strength = 2.4 if is_police_light_name(material_obj.name) else 1.15
@@ -1852,8 +1864,7 @@ def add_studio_floor(min_z, max_dim, cutout_mode):
     floor.name = "catalog_floor"
     floor.data.materials.append(floor_mat)
     if cutout_mode:
-        if not set_shadow_catcher(floor):
-            set_camera_visible(floor, False)
+        set_camera_visible(floor, False)
     return floor
 
 
@@ -1928,8 +1939,7 @@ def setup_scene(job, objects):
     max_dim = max(dims.x, dims.y, dims.z, 1.0)
 
     floor_clearance = max(float(job.get("floor_clearance", 0.12)), 0.0)
-    if not cutout_mode:
-        add_studio_floor(min_v.z - floor_clearance, max_dim, cutout_mode)
+    add_studio_floor(min_v.z - floor_clearance, max_dim, cutout_mode)
 
     yaw = math.radians(float(job.get("yaw", -42.0)))
     elevation = math.radians(float(job.get("elevation", 26.0)))
@@ -2142,9 +2152,11 @@ def process_green_image(input_path, output_path, threshold=70, padding=0, min_wi
 def save_image(path, width, height, pixels, name, min_width=0, min_height=0):
     image = bpy.data.images.new(name, width=width, height=height, alpha=True)
     image.pixels.foreach_set(pixels)
+    image.update()
     target_width, target_height = minimum_output_dimensions(width, height, min_width, min_height)
     if (target_width, target_height) != (width, height):
         image.scale(target_width, target_height)
+        image.update()
     image.filepath_raw = str(path)
     image.file_format = "PNG"
     image.save()
