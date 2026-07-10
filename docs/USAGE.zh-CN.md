@@ -12,7 +12,7 @@
 3. 扫描 `.yft`、`.ydr`、`.ydd`、`.ymap`。
 4. 从本地 `.ytd` 和共享 `vehshare.ytd` 提取贴图。
 5. 调用 Blender/Sollumz 导入模型、绑定贴图并渲染。
-6. 输出白底预览、绿幕预览、透明裁切 PNG 和贴图报告。
+6. 输出白底预览、绿幕预览、完整画布透明 PNG 和贴图报告。
 
 不传 `--model` 时，一个压缩包里有多少可导入模型就渲染多少个；传 `--model` 才会只渲染指定模型。
 
@@ -28,7 +28,7 @@
 
 ### 武器示例
 
-| 模型 | 白底样图 | 透明裁切 PNG |
+| 模型 | 白底样图 | 透明 PNG |
 | --- | --- | --- |
 | w_pi_fn509t | ![w_pi_fn509t white](images/weapon_w_pi_fn509t_white.png) | ![w_pi_fn509t cutout](images/weapon_w_pi_fn509t_cutout.png) |
 | w_sg_beanbagshotgun | ![w_sg_beanbagshotgun white](images/weapon_w_sg_beanbagshotgun_white.png) | ![w_sg_beanbagshotgun cutout](images/weapon_w_sg_beanbagshotgun_cutout.png) |
@@ -36,7 +36,7 @@
 
 ### 饰品示例
 
-| 模型 | 白底样图 | 透明裁切 PNG |
+| 模型 | 白底样图 | 透明 PNG |
 | --- | --- | --- |
 | labubu_clap | ![labubu_clap white](images/accessory_labubu_clap_white.png) | ![labubu_clap cutout](images/accessory_labubu_clap_cutout.png) |
 | shibanita | ![shibanita white](images/accessory_shibanita_white.png) | ![shibanita cutout](images/accessory_shibanita_cutout.png) |
@@ -89,15 +89,15 @@ map            .ymap
 - 一个压缩包里多个 `.ydr` 会全部生成任务，例如武器主体、弹匣、饰品模型都会输出 PNG。
 - `weapon/accessory/prop` 会按路径和模型名分类过滤；`drawable/all` 不过滤 `.ydr`。
 
-## 5. 透明图裁切
+## 5. 透明图输出
 
-`--cutout` 模式会输出透明 PNG：
+`--cutout` 模式会输出保持 `--width/--height` 指定尺寸的透明 PNG：
 
 ```text
 _vehicle_renders\model.png
 ```
 
-最终 PNG 默认 `--key-padding 0`，会根据 alpha 边界裁掉所有透明空白像素。需要给图片留边时再加：
+正常渲染不会再按 alpha 边界紧裁。`--key-padding` 只用于独立 `--key-green` 抠图，需要给裁剪结果留边时可加：
 
 ```powershell
 --key-padding 12
@@ -152,7 +152,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 --key-padding 0
 ```
 
-`--model-tone gray/white/black` 只调整车辆原生主色、副色和珠光车漆层，不覆盖漫反射贴图。玻璃、灯光、轮胎、轮毂、内饰和贴花不参与改色。
+`--model-tone gray/white` 只调整车辆原生主色、副色和珠光车漆层，不覆盖漫反射贴图；`black` 保留旧版黑模的纹理明暗乘算。玻璃、灯光、轮胎、轮毂、内饰和贴花不参与白/灰改色。
 
 ## 8. 输出结构
 
@@ -182,7 +182,7 @@ python "D:\fivem\vehicle_renderer\render_all_vehicles.py" "D:\fivem\TestVeh" --a
 
 ### PNG 四周还有透明边
 
-默认已经是 `--key-padding 0`。如果之前用旧版本生成过，使用 `--force` 重跑。
+正常 `--cutout` 会保留完整画布和透明边；独立 `--key-green` 才会按 `--key-padding` 裁剪。旧版本结果请使用 `--force` 重跑。
 
 ### 模型导入失败
 

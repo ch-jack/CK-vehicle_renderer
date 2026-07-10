@@ -890,18 +890,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Multiplier for all area lights. Default: 1.18 with --cutout, otherwise 0.72. Vehicle black cutout compatibility uses 1.45.",
     )
     parser.add_argument("--floor-gap", type=float, default=0.12, help="Lower the floor below visible bounds to avoid wheel clipping.")
-    parser.add_argument("--cutout", action="store_true", help="Render green screen and output transparent cropped PNG.")
+    parser.add_argument("--cutout", action="store_true", help="Render green screen and output a full-frame transparent PNG.")
     parser.add_argument(
         "--model-tone",
         choices=("gray", "white", "black"),
         default="gray",
-        help="Vehicle paint tone. All tones use native primary, secondary and pearlescent paint layers.",
+        help="Vehicle paint tone. Gray/white use native paint layers; black keeps legacy texture-detail shading.",
     )
     parser.add_argument("--no-special-lights", action="store_true", help="Disable police/self-emissive material emission tuning.")
     parser.add_argument("--key-green", default="", help="Standalone green-screen PNG file/folder to key and crop.")
     parser.add_argument("--key-out", default="", help="Output file/folder for --key-green.")
     parser.add_argument("--key-threshold", type=int, default=70, help="Green key threshold, 0-255.")
-    parser.add_argument("--key-padding", type=int, default=0, help="Transparent cutout padding in pixels. Default 0 crops all empty transparent pixels.")
+    parser.add_argument("--key-padding", type=int, default=0, help="Padding for standalone --key-green cropping.")
     parser.add_argument("--perspective", action="store_true", help="Use perspective camera instead of orthographic.")
     parser.add_argument("--ytd-mode", choices=("all", "match", "none"), default="all")
     parser.add_argument("--shared-ytd", action="append", default=[], help="Extra shared .ytd file or folder, for example exported vehshare.ytd.")
@@ -1033,7 +1033,7 @@ def main(argv: list[str]) -> int:
     if args.shared_ytd_paths:
         print(f"Shared YTD: {len(args.shared_ytd_paths)}")
     if args.cutout:
-        print("Cutout: green-screen key + crop")
+        print(f"Cutout: green-screen + full-frame transparent PNG ({args.width}x{args.height})")
 
     failures: list[tuple[str, int]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:

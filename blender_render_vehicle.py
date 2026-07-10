@@ -64,6 +64,7 @@ MODEL_TONE_PALETTE = {
     "black": ((0.045, 0.045, 0.04, 1.0), (0.26, 0.27, 0.26, 1.0)),
 }
 VEHICLE_BODY_PAINT_LAYERS = {1, 2, 3}
+TEXTURED_BLACK_TINT = (0.045, 0.045, 0.04, 1.0)
 GREEN_SCREEN_COLOR = (0.0, 1.0, 0.0)
 
 
@@ -640,7 +641,9 @@ def protected_vehicle_model_tone_material(name):
         return True
 
     semantic = material_semantic(name)
-    if semantic in {"glass", "light", "rubber", "brake", "chrome", "metal", "carbon", "plastic", "leather", "fabric"}:
+    if semantic in {"glass", "light", "rubber", "brake", "leather", "fabric"}:
+        return True
+    if MODEL_TONE != "black" and semantic in {"chrome", "metal", "carbon", "plastic"}:
         return True
 
     protected = (
@@ -719,6 +722,8 @@ def vehicle_model_tone_factor(name):
         return 1.0
     if is_paint_like_material(name):
         return 1.0
+    if MODEL_TONE == "black":
+        return 1.0
     return 0.0
 
 
@@ -781,6 +786,63 @@ def apply_vehicle_paint_tones():
     if changed:
         print(f"Vehicle paint tone adjusted: {len(changed)}")
         print("Vehicle paint tone materials: " + ", ".join(changed[:36]))
+    return len(changed)
+
+
+def vehicle_black_texture_tone_factor(name):
+    if not use_legacy_vehicle_black_cutout():
+        return 0.0
+    raw = str(name or "").lower()
+    key = normalized_texture_name(name)
+    if not key or "pearlescent" in raw or protected_vehicle_model_tone_material(name):
+        return 0.0
+    if "[primary]" in raw or "[secondary]" in raw or key.isdigit() or key == "matte":
+        return 0.97
+    if is_paint_like_material(name):
+        return 0.95
+    return 0.92
+
+
+def apply_vehicle_black_texture_tones():
+    if not use_legacy_vehicle_black_cutout():
+        return 0
+    changed = []
+    for material_obj in bpy.data.materials:
+        if not material_obj.use_nodes or not material_obj.node_tree:
+            continue
+        factor = vehicle_black_texture_tone_factor(material_obj.name)
+        if factor <= 0.0:
+            continue
+        for node in material_obj.node_tree.nodes:
+            if node.bl_idname != "ShaderNodeBsdfPrincipled":
+                continue
+            base = node.inputs.get("Base Color")
+            if not base or not base.is_linked or not base_color_has_upstream_texture(node):
+                continue
+            if any(
+                link.from_node and link.from_node.name == "vehicle_renderer_black_texture_multiply"
+                for link in base.links
+            ):
+                continue
+            links = list(base.links)
+            if not links:
+                continue
+            source_socket = links[0].from_socket
+            for link in links:
+                material_obj.node_tree.links.remove(link)
+            mix_node = material_obj.node_tree.nodes.new("ShaderNodeMixRGB")
+            mix_node.name = "vehicle_renderer_black_texture_multiply"
+            mix_node.label = "legacy black texture detail"
+            mix_node.blend_type = "MULTIPLY"
+            mix_node.inputs["Fac"].default_value = factor
+            mix_node.inputs["Color2"].default_value = TEXTURED_BLACK_TINT
+            material_obj.node_tree.links.new(source_socket, mix_node.inputs["Color1"])
+            material_obj.node_tree.links.new(mix_node.outputs["Color"], base)
+            changed.append(material_obj.name)
+            break
+    if changed:
+        print(f"Vehicle black texture detail adjusted: {len(changed)}")
+        print("Vehicle black texture detail materials: " + ", ".join(changed[:36]))
     return len(changed)
 
 
@@ -1290,11 +1352,11 @@ def apply_untextured_model_tone(material_obj, node):
         return False
     if vehicle_model_tone_factor(material_obj.name) <= 0.0:
         return False
-    if vehicle_material_uses_paint_tone(material_obj):
+    if vehicle_material_uses_paint_tone(material_obj) and not use_legacy_vehicle_black_cutout():
         return True
     if base_color_has_upstream_texture(node):
         return False
-    color = vehicle_paint_tone_color()
+    color = PAINT_COLOR if use_legacy_vehicle_black_cutout() else vehicle_paint_tone_color()
     force_input(node, "Base Color", color)
     material_obj.diffuse_color = color
     return True
@@ -1743,17 +1805,20 @@ def bind_extracted_textures(job):
     generic_links = bind_generic_asset_texture(texture_index, texture_manifest, job)
     part_links = bind_untextured_materials(texture_index, texture_manifest)
     window_tunes = tune_window_materials()
-    paint_tones = apply_vehicle_paint_tones()
     if use_legacy_vehicle_black_cutout():
+        paint_tones = 0
+        black_texture_tones = apply_vehicle_black_texture_tones()
         surface_tunes = tune_legacy_vehicle_black_semantic_materials()
     else:
+        paint_tones = apply_vehicle_paint_tones()
+        black_texture_tones = 0
         surface_tunes = tune_semantic_materials(bool(job.get("special_lights", True)))
     dump_wheel_materials()
     print(
         f"Texture bind matched: {matched}, missing: {len(missing)}, "
         f"livery_links: {livery_links}, generic_links: {generic_links}, part_links: {part_links}, "
         f"window_tunes: {window_tunes}, surface_tunes: {surface_tunes}, "
-        f"paint_tones: {paint_tones}. "
+        f"paint_tones: {paint_tones}, black_texture_tones: {black_texture_tones}. "
         "Material parameters preserved."
     )
     write_texture_bind_report(
@@ -2200,7 +2265,7 @@ def normalize_alpha(alpha, background_alpha):
     return 0.0 if normalized <= 0.035 else normalized
 
 
-def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0):
+def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0, crop=True):
     alpha_path = Path(alpha_path).resolve()
     green_path = Path(green_path).resolve()
     cutout_path = Path(cutout_path).resolve()
@@ -2240,6 +2305,18 @@ def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0
             ]
 
     save_image(green_path, width, height, green_pixels, "vehicle_renderer_green_preview")
+
+    if not crop:
+        save_image(
+            cutout_path,
+            width,
+            height,
+            normalized_pixels,
+            "vehicle_renderer_full_frame_alpha_cutout",
+        )
+        bpy.data.images.remove(image)
+        print(f"Full-frame alpha cutout: {alpha_path} -> {cutout_path} ({width}x{height})")
+        return
 
     if max_x < min_x or max_y < min_y:
         save_image(cutout_path, 1, 1, [0.0, 0.0, 0.0, 0.0], "vehicle_renderer_empty_alpha_cutout")
@@ -2335,6 +2412,7 @@ def main():
             job.get("green_screen_path") or output_path,
             job["cutout_path"],
             int(job.get("key_padding", 12)),
+            crop=False,
         )
 
 

@@ -19,7 +19,7 @@
 
 ### 武器示例
 
-| 模型 | 白底样图 | 透明裁切 PNG |
+| 模型 | 白底样图 | 透明 PNG |
 | --- | --- | --- |
 | w_pi_fn509t | ![w_pi_fn509t white](docs/images/weapon_w_pi_fn509t_white.png) | ![w_pi_fn509t cutout](docs/images/weapon_w_pi_fn509t_cutout.png) |
 | w_sg_beanbagshotgun | ![w_sg_beanbagshotgun white](docs/images/weapon_w_sg_beanbagshotgun_white.png) | ![w_sg_beanbagshotgun cutout](docs/images/weapon_w_sg_beanbagshotgun_cutout.png) |
@@ -27,7 +27,7 @@
 
 ### 饰品示例
 
-| 模型 | 白底样图 | 透明裁切 PNG |
+| 模型 | 白底样图 | 透明 PNG |
 | --- | --- | --- |
 | labubu_clap | ![labubu_clap white](docs/images/accessory_labubu_clap_white.png) | ![labubu_clap cutout](docs/images/accessory_labubu_clap_cutout.png) |
 | shibanita | ![shibanita white](docs/images/accessory_shibanita_white.png) | ![shibanita cutout](docs/images/accessory_shibanita_cutout.png) |
@@ -44,7 +44,7 @@
 - `--workers` 多进程并发渲染。
 - `--cutout` 输出透明 PNG，保留车漆高光、反光和半透明阴影。
 - 不会创建额外点光源补光；明确的警灯/自发光材质只按原材质颜色写入 emission，不按名字强制改成红/橙。
-- 最终 PNG 默认裁掉所有透明空白像素；需要保留边距时加 `--key-padding 12`。
+- 正常渲染的透明 PNG 保持 `--width/--height` 指定尺寸，模型不会因紧裁而贴边或显示不全。
 - 同时保留 `_greenscreen` 绿幕预览和 `_alpha` 原始透明图。
 - 每次渲染生成 `_texture_report.txt/.json`，列出贴图命中和缺失情况。
 
@@ -93,7 +93,7 @@ map            .ymap
 
 ```text
 _vehicle_renders/
-  model.png                    # 最终透明裁切 PNG
+  model.png                    # 最终完整画布透明 PNG
   _alpha/model.png             # Blender 原始透明渲染
   _greenscreen/model.png       # 绿幕预览
   _textures/model/*.png        # 提取出来的贴图
@@ -135,9 +135,9 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 --key-padding 0
 ```
 
-`--model-tone gray/white/black` 只调整车辆原生主色、副色和珠光车漆层，不覆盖漫反射贴图。玻璃、灯光、轮胎、轮毂、内饰和贴花不参与改色。
+`--model-tone gray/white` 只调整车辆原生主色、副色和珠光车漆层，不覆盖漫反射贴图；`black` 保留旧版黑模的纹理明暗乘算。玻璃、灯光、轮胎、轮毂、内饰和贴花不参与白/灰改色。
 
-`--key-padding` 默认是 `0`，表示裁掉所有透明空白像素；如果文档或网页展示需要留边，可以设为 `8` 或 `12`。
+`--key-padding` 只控制独立 `--key-green` 抠图的裁剪留边；正常 `--cutout` 渲染始终保留 `--width/--height` 完整画布。
 
 ## 内置运行资源
 
