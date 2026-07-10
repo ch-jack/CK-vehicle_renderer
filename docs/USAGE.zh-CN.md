@@ -46,7 +46,13 @@
 
 ## 3. 推荐命令
 
-渲染全部支持资源：
+直接把文件夹交给入口，默认扫描全部类型并输出透明裁切图：
+
+```cmd
+render_folder.cmd "D:\fivem\TestVeh"
+```
+
+等价的 Python 命令：
 
 ```powershell
 python "D:\fivem\vehicle_renderer\render_all_vehicles.py" "D:\fivem\TestVeh" --asset-types all --workers 2 --force --cutout
@@ -91,19 +97,19 @@ map            .ymap
 
 ## 5. 透明图输出
 
-`--cutout` 模式的根目录 PNG 会按模型可见边界裁切：
+`--cutout` 模式的根目录 PNG 会像 Photoshop“裁切透明像素”一样，按 8 位 PNG 中所有非零 alpha 像素精确裁切：
 
 ```text
 _vehicle_renders\model.png
 ```
 
-正常 `--cutout` 会按 alpha 边界裁掉根目录 PNG 的空白，完整画布保存在 `_alpha`。需要给裁剪结果留边时可加：
+默认 `--key-padding 0` 不保留任何透明边距，完整画布保存在 `_alpha`。需要给裁剪结果留边时可加：
 
 ```powershell
 --key-padding 12
 ```
 
-武器、饰品等小模型按实际包围盒取景，不再使用固定 1 米最小画幅，因此裁边后仍保留足够像素。
+车辆、武器、饰品及其他模型统一按实际投影边界自适应取景，只保留防止零尺寸的极小下限。
 
 同时保留：
 
@@ -186,7 +192,7 @@ python "D:\fivem\vehicle_renderer\render_all_vehicles.py" "D:\fivem\TestVeh" --a
 
 ### PNG 四周还有透明边
 
-正常 `--cutout` 的根目录 PNG 会裁掉透明空白，`_alpha` 保留完整画布；`--key-padding` 控制裁剪留边。旧版本结果请使用 `--force` 重跑。
+正常 `--cutout` 的根目录 PNG 会精确裁掉完全透明像素，`_alpha` 保留完整画布；`--key-padding` 大于 0 时才增加留边。旧版本结果请使用 `--force` 重跑。
 
 ### 模型导入失败
 

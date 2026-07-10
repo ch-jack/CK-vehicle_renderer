@@ -66,7 +66,8 @@ MODEL_TONE_PALETTE = {
 VEHICLE_BODY_PAINT_LAYERS = {1, 2, 3}
 TEXTURED_BLACK_TINT = (0.045, 0.045, 0.04, 1.0)
 GREEN_SCREEN_COLOR = (0.0, 1.0, 0.0)
-CROP_ALPHA_THRESHOLD = 0.15
+PNG_ALPHA_HALF_STEP = 0.5 / 255.0
+MIN_PROJECTED_ORTHO_SCALE = 0.0001
 
 
 def use_legacy_vehicle_black_cutout():
@@ -2058,7 +2059,7 @@ def center_camera_on_projection(objects, camera):
     bpy.context.view_layer.update()
 
 
-def projected_ortho_scale(objects, camera, aspect, margin=1.28, minimum=1.0):
+def projected_ortho_scale(objects, camera, aspect, margin=1.28, minimum=MIN_PROJECTED_ORTHO_SCALE):
     min_x, max_x, min_y, max_y = projected_bounds(objects, camera)
     width = max_x - min_x
     height = max_y - min_y
@@ -2108,8 +2109,7 @@ def setup_scene(job, objects):
     if bool(job.get("orthographic", True)):
         camera.data.type = "ORTHO"
         aspect = float(job.get("width", 1600)) / max(float(job.get("height", 1000)), 1.0)
-        minimum_scale = 1.0 if job.get("asset_kind", "vehicle") == "vehicle" else 0.05
-        camera.data.ortho_scale = projected_ortho_scale(objects, camera, aspect, margin=1.85, minimum=minimum_scale)
+        camera.data.ortho_scale = projected_ortho_scale(objects, camera, aspect, margin=1.85)
     else:
         camera.data.type = "PERSP"
         camera.data.lens = 70
@@ -2332,10 +2332,6 @@ def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0
     pixels = list(image.pixels[:])
     background_alpha = estimate_background_alpha(pixels, width, height)
     padding = max(int(padding), 0)
-    min_x = width
-    min_y = height
-    max_x = -1
-    max_y = -1
 
     green_pixels = [0.0] * len(pixels)
     normalized_pixels = [0.0] * len(pixels)
@@ -2344,11 +2340,6 @@ def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0
             idx = (y * width + x) * 4
             r, g, b, a = pixels[idx : idx + 4]
             a = normalize_alpha(a, background_alpha)
-            if a > CROP_ALPHA_THRESHOLD:
-                min_x = min(min_x, x)
-                min_y = min(min_y, y)
-                max_x = max(max_x, x)
-                max_y = max(max_y, y)
             if a <= 0.01:
                 r = g = b = 0.0
             normalized_pixels[idx : idx + 4] = [r, g, b, a]
@@ -2374,6 +2365,29 @@ def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0
             )
         print(f"Full-frame alpha cutout: {alpha_path} -> {cutout_path} ({width}x{height})")
         return
+    encoded_image = bpy.data.images.load(str(alpha_path), check_existing=False)
+    encoded_width, encoded_height = encoded_image.size
+    if (encoded_width, encoded_height) != (width, height):
+        bpy.data.images.remove(encoded_image)
+        raise RuntimeError(
+            f"Normalized alpha dimensions changed: {width}x{height} -> {encoded_width}x{encoded_height}"
+        )
+    normalized_pixels = list(encoded_image.pixels[:])
+    bpy.data.images.remove(encoded_image)
+
+    min_x = width
+    min_y = height
+    max_x = -1
+    max_y = -1
+    for y in range(height):
+        for x in range(width):
+            idx = (y * width + x) * 4
+            if normalized_pixels[idx + 3] >= PNG_ALPHA_HALF_STEP:
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+
 
     if max_x < min_x or max_y < min_y:
         save_image(cutout_path, 1, 1, [0.0, 0.0, 0.0, 0.0], "vehicle_renderer_empty_alpha_cutout")

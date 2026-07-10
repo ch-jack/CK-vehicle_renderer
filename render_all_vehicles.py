@@ -20,7 +20,6 @@ ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z"}
 LEGACY_VEHICLE_BLACK_CUTOUT_EXPOSURE = -0.5
 LEGACY_VEHICLE_BLACK_CUTOUT_WORLD_STRENGTH = 0.66
 LEGACY_VEHICLE_BLACK_CUTOUT_LIGHT_SCALE = 1.45
-LEGACY_VEHICLE_BLACK_CUTOUT_KEY_PADDING = 12
 
 
 @dataclass(frozen=True)
@@ -601,8 +600,6 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
             world_strength = LEGACY_VEHICLE_BLACK_CUTOUT_WORLD_STRENGTH
         if args.light_scale_auto:
             light_scale = LEGACY_VEHICLE_BLACK_CUTOUT_LIGHT_SCALE
-        if key_padding == 0:
-            key_padding = LEGACY_VEHICLE_BLACK_CUTOUT_KEY_PADDING
     if args.cutout and asset_kind != "vehicle":
         if args.exposure_auto:
             exposure = -0.08
@@ -901,7 +898,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--key-green", default="", help="Standalone green-screen PNG file/folder to key and crop.")
     parser.add_argument("--key-out", default="", help="Output file/folder for --key-green.")
     parser.add_argument("--key-threshold", type=int, default=70, help="Green key threshold, 0-255.")
-    parser.add_argument("--key-padding", type=int, default=0, help="Padding around cropped transparent PNGs, including standalone --key-green.")
+    parser.add_argument("--key-padding", type=int, default=0, help="Transparent crop padding. Default 0 matches PNG transparent-pixel trim.")
     parser.add_argument("--perspective", action="store_true", help="Use perspective camera instead of orthographic.")
     parser.add_argument("--ytd-mode", choices=("all", "match", "none"), default="all")
     parser.add_argument("--shared-ytd", action="append", default=[], help="Extra shared .ytd file or folder, for example exported vehshare.ytd.")
@@ -1033,7 +1030,7 @@ def main(argv: list[str]) -> int:
     if args.shared_ytd_paths:
         print(f"Shared YTD: {len(args.shared_ytd_paths)}")
     if args.cutout:
-        print(f"Cutout: cropped transparent PNG + full-frame _alpha + green-screen ({args.width}x{args.height})")
+        print(f"Cutout: exact transparent-pixel trim + full-frame _alpha + green-screen ({args.width}x{args.height})")
 
     failures: list[tuple[str, int]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:

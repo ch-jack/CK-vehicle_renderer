@@ -44,14 +44,20 @@
 - `--workers` 多进程并发渲染。
 - `--cutout` 输出透明 PNG，保留车漆高光、反光和半透明阴影。
 - 不会创建额外点光源补光；明确的警灯/自发光材质只按原材质颜色写入 emission，不按名字强制改成红/橙。
-- 根目录透明 PNG 会按实际 alpha 边界裁掉空白；`_alpha` 仍保持 `--width/--height` 完整画布，避免模型显示不全。
-- 武器、饰品等小模型按实际包围盒取景，避免固定 1 米画幅导致裁边后只剩低分辨率缩略图。
+- 根目录透明 PNG 按 8 位 PNG 中所有非零 alpha 像素精确裁切，效果等同 Photoshop“裁切透明像素”；`_alpha` 仍保持 `--width/--height` 完整画布。
+- 车辆、武器、饰品及其他模型统一按实际投影边界自适应取景，不再按资源类型使用固定最小画幅。
 - 同时保留 `_greenscreen` 绿幕预览和 `_alpha` 归一化透明图。
 - 每次渲染生成 `_texture_report.txt/.json`，列出贴图命中和缺失情况。
 
 ## 快速使用
 
-渲染目录内所有支持资源：
+直接把文件夹交给入口，默认扫描全部类型并输出透明裁切图：
+
+```cmd
+render_folder.cmd "D:\fivem\TestVeh"
+```
+
+等价的 Python 命令：
 
 ```powershell
 python "D:\fivem\vehicle_renderer\render_all_vehicles.py" "D:\fivem\TestVeh" --asset-types all --workers 2 --force --cutout
@@ -140,7 +146,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 
 Cycles 渲染前会把 Sollumz 数值参数烘焙为标准 Blender 节点常量，已有 Base Color 上游贴图链不会被补图逻辑覆盖。武器材质若把 `_dpal` / palette / tint 调色板误接到 Base Color，会改用本地漫反射贴图（例如 `map.png`）；`_nm` / `_spec` 按 Non-Color 数据读取。
 
-`--key-padding` 控制透明 PNG 的裁剪留边；正常 `--cutout` 的根目录 PNG 会裁边，`_alpha` 始终保留 `--width/--height` 完整画布。
+`--key-padding 0`（默认）等同 Photoshop“裁切透明像素”；大于 0 时才会在透明 PNG 周围增加指定像素留边。`_alpha` 始终保留 `--width/--height` 完整画布。
 
 ## 内置运行资源
 
