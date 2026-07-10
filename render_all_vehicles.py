@@ -17,9 +17,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 TOOLS_DIR = SCRIPT_DIR / "tools"
 INNER_SCRIPT = SCRIPT_DIR / "blender_render_vehicle.py"
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z"}
-LEGACY_VEHICLE_BLACK_CUTOUT_EXPOSURE = -0.5
-LEGACY_VEHICLE_BLACK_CUTOUT_WORLD_STRENGTH = 0.66
-LEGACY_VEHICLE_BLACK_CUTOUT_LIGHT_SCALE = 1.45
 
 
 @dataclass(frozen=True)
@@ -593,13 +590,6 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
     world_strength = args.world_strength
     light_scale = args.light_scale
     key_padding = args.key_padding
-    if args.cutout and asset_kind == "vehicle" and args.model_tone == "black":
-        if args.exposure_auto:
-            exposure = LEGACY_VEHICLE_BLACK_CUTOUT_EXPOSURE
-        if args.world_strength_auto:
-            world_strength = LEGACY_VEHICLE_BLACK_CUTOUT_WORLD_STRENGTH
-        if args.light_scale_auto:
-            light_scale = LEGACY_VEHICLE_BLACK_CUTOUT_LIGHT_SCALE
     if args.cutout and asset_kind != "vehicle":
         if args.exposure_auto:
             exposure = -0.08
@@ -642,6 +632,8 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
         "green_screen": args.cutout,
         "key_threshold": args.key_threshold,
         "key_padding": key_padding,
+        "cutout_width": args.cutout_width,
+        "cutout_height": args.cutout_height,
         "width": args.width,
         "height": args.height,
         "samples": args.samples,
@@ -834,6 +826,8 @@ def run_green_key(blender: Path, args) -> int:
         f"key_output={output_path}",
         f"key_threshold={args.key_threshold}",
         f"key_padding={args.key_padding}",
+        f"cutout_width={args.cutout_width}",
+        f"cutout_height={args.cutout_height}",
     ]
     print(" ".join(cmd))
     result = subprocess.run(cmd, cwd=str(SCRIPT_DIR))
@@ -872,19 +866,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--exposure",
         type=float,
         default=None,
-        help="Render exposure. Default: 0.16 with --cutout, otherwise -0.2. Vehicle black cutout compatibility uses -0.5.",
+        help="Render exposure. Default: 0.16 with --cutout, otherwise -0.2.",
     )
     parser.add_argument(
         "--world-strength",
         type=float,
         default=None,
-        help="White world light strength. Default: 0.56 with --cutout, otherwise 0.45. Vehicle black cutout compatibility uses 0.66.",
+        help="White world light strength. Default: 0.56 with --cutout, otherwise 0.45.",
     )
     parser.add_argument(
         "--light-scale",
         type=float,
         default=None,
-        help="Multiplier for all area lights. Default: 1.18 with --cutout, otherwise 0.72. Vehicle black cutout compatibility uses 1.45.",
+        help="Multiplier for all area lights. Default: 1.18 with --cutout, otherwise 0.72.",
     )
     parser.add_argument("--floor-gap", type=float, default=0.12, help="Lower the floor below visible bounds to avoid wheel clipping.")
     parser.add_argument("--cutout", action="store_true", help="Render green screen, a cropped transparent PNG, and a full-frame _alpha PNG.")
@@ -892,13 +886,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--model-tone",
         choices=("gray", "white", "black"),
         default="gray",
-        help="Vehicle paint tone. Gray/white use native paint layers; black keeps legacy texture-detail shading.",
+        help="Vehicle paint tone. All tones change native paint layers without darkening appearance textures.",
     )
     parser.add_argument("--no-special-lights", action="store_true", help="Disable police/self-emissive material emission tuning.")
     parser.add_argument("--key-green", default="", help="Standalone green-screen PNG file/folder to key and crop.")
     parser.add_argument("--key-out", default="", help="Output file/folder for --key-green.")
     parser.add_argument("--key-threshold", type=int, default=70, help="Green key threshold, 0-255.")
     parser.add_argument("--key-padding", type=int, default=0, help="Transparent crop padding. Default 0 matches PNG transparent-pixel trim.")
+    parser.add_argument("--cutout-width", type=int, default=0, help="Minimum cropped PNG width. Upscales only; 0 keeps native size.")
+    parser.add_argument("--cutout-height", type=int, default=0, help="Minimum cropped PNG height. Upscales only; 0 keeps native size.")
     parser.add_argument("--perspective", action="store_true", help="Use perspective camera instead of orthographic.")
     parser.add_argument("--ytd-mode", choices=("all", "match", "none"), default="all")
     parser.add_argument("--shared-ytd", action="append", default=[], help="Extra shared .ytd file or folder, for example exported vehshare.ytd.")
@@ -1031,6 +1027,8 @@ def main(argv: list[str]) -> int:
         print(f"Shared YTD: {len(args.shared_ytd_paths)}")
     if args.cutout:
         print(f"Cutout: exact transparent-pixel trim + full-frame _alpha + green-screen ({args.width}x{args.height})")
+        if args.cutout_width or args.cutout_height:
+            print(f"Cutout minimum: {max(args.cutout_width, 0)}x{max(args.cutout_height, 0)} (aspect ratio preserved)")
 
     failures: list[tuple[str, int]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:

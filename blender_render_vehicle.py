@@ -56,22 +56,15 @@ PAINT_COLOR = (0.12, 0.13, 0.12, 1.0)
 CHROME_FALLBACK_COLOR = (0.26, 0.27, 0.26, 1.0)
 MODEL_TONE = "gray"
 ASSET_KIND = "vehicle"
-LEGACY_VEHICLE_BLACK_PAINT_COLOR = (0.30, 0.31, 0.30, 1.0)
-LEGACY_VEHICLE_BLACK_CHROME_COLOR = (0.26, 0.27, 0.26, 1.0)
 MODEL_TONE_PALETTE = {
     "gray": ((0.12, 0.13, 0.12, 1.0), (0.26, 0.27, 0.26, 1.0)),
     "white": ((0.62, 0.64, 0.61, 1.0), (0.26, 0.27, 0.26, 1.0)),
     "black": ((0.045, 0.045, 0.04, 1.0), (0.26, 0.27, 0.26, 1.0)),
 }
 VEHICLE_BODY_PAINT_LAYERS = {1, 2, 3}
-TEXTURED_BLACK_TINT = (0.045, 0.045, 0.04, 1.0)
 GREEN_SCREEN_COLOR = (0.0, 1.0, 0.0)
 PNG_ALPHA_HALF_STEP = 0.5 / 255.0
 MIN_PROJECTED_ORTHO_SCALE = 0.0001
-
-
-def use_legacy_vehicle_black_cutout():
-    return ASSET_KIND == "vehicle" and MODEL_TONE == "black"
 
 
 def apply_model_tone(job):
@@ -80,10 +73,7 @@ def apply_model_tone(job):
     paint, chrome = MODEL_TONE_PALETTE.get(tone, MODEL_TONE_PALETTE["gray"])
     MODEL_TONE = tone
     ASSET_KIND = str(job.get("asset_kind", "vehicle")).lower()
-    if use_legacy_vehicle_black_cutout():
-        paint = LEGACY_VEHICLE_BLACK_PAINT_COLOR
-        chrome = LEGACY_VEHICLE_BLACK_CHROME_COLOR
-    elif ASSET_KIND != "vehicle" and tone == "gray":
+    if ASSET_KIND != "vehicle" and tone == "gray":
         paint = (0.18, 0.18, 0.17, 1.0)
         chrome = (0.16, 0.16, 0.15, 1.0)
     PAINT_COLOR = paint
@@ -664,7 +654,7 @@ def protected_vehicle_model_tone_material(name):
     semantic = material_semantic(name)
     if semantic in {"glass", "light", "rubber", "brake", "leather", "fabric"}:
         return True
-    if MODEL_TONE != "black" and semantic in {"chrome", "metal", "carbon", "plastic"}:
+    if semantic in {"chrome", "metal", "carbon", "plastic"}:
         return True
 
     protected = (
@@ -742,8 +732,6 @@ def vehicle_model_tone_factor(name):
     if key.isdigit() or key == "matte":
         return 1.0
     if is_paint_like_material(name):
-        return 1.0
-    if MODEL_TONE == "black":
         return 1.0
     return 0.0
 
@@ -838,63 +826,6 @@ def bake_sollumz_shader_parameters():
         print(f"Sollumz shader parameters baked: {baked_links} links in {len(baked_materials)} materials")
         print("Sollumz parameter materials: " + ", ".join(sorted(baked_materials)[:36]))
     return baked_links
-
-
-def vehicle_black_texture_tone_factor(name):
-    if not use_legacy_vehicle_black_cutout():
-        return 0.0
-    raw = str(name or "").lower()
-    key = normalized_texture_name(name)
-    if not key or "pearlescent" in raw or protected_vehicle_model_tone_material(name):
-        return 0.0
-    if "[primary]" in raw or "[secondary]" in raw or key.isdigit() or key == "matte":
-        return 0.97
-    if is_paint_like_material(name):
-        return 0.95
-    return 0.92
-
-
-def apply_vehicle_black_texture_tones():
-    if not use_legacy_vehicle_black_cutout():
-        return 0
-    changed = []
-    for material_obj in bpy.data.materials:
-        if not material_obj.use_nodes or not material_obj.node_tree:
-            continue
-        factor = vehicle_black_texture_tone_factor(material_obj.name)
-        if factor <= 0.0:
-            continue
-        for node in material_obj.node_tree.nodes:
-            if node.bl_idname != "ShaderNodeBsdfPrincipled":
-                continue
-            base = node.inputs.get("Base Color")
-            if not base or not base.is_linked or not base_color_has_upstream_texture(node):
-                continue
-            if any(
-                link.from_node and link.from_node.name == "vehicle_renderer_black_texture_multiply"
-                for link in base.links
-            ):
-                continue
-            links = list(base.links)
-            if not links:
-                continue
-            source_socket = links[0].from_socket
-            for link in links:
-                material_obj.node_tree.links.remove(link)
-            mix_node = material_obj.node_tree.nodes.new("ShaderNodeMixRGB")
-            mix_node.name = "vehicle_renderer_black_texture_multiply"
-            mix_node.label = "legacy black texture detail"
-            mix_node.blend_type = "MULTIPLY"
-            mix_node.inputs["Fac"].default_value = factor
-            mix_node.inputs["Color2"].default_value = TEXTURED_BLACK_TINT
-            material_obj.node_tree.links.new(source_socket, mix_node.inputs["Color1"])
-            material_obj.node_tree.links.new(mix_node.outputs["Color"], base)
-            changed.append(material_obj.name)
-            break
-    if changed:
-        print(f"Vehicle black texture detail adjusted: {len(changed)}")
-        print("Vehicle black texture detail materials: " + ", ".join(changed[:36]))
-    return len(changed)
 
 
 def strip_texture_suffix(name):
@@ -1407,11 +1338,11 @@ def apply_untextured_model_tone(material_obj, node):
         return False
     if vehicle_model_tone_factor(material_obj.name) <= 0.0:
         return False
-    if vehicle_material_uses_paint_tone(material_obj) and not use_legacy_vehicle_black_cutout():
+    if vehicle_material_uses_paint_tone(material_obj):
         return True
     if base_color_has_upstream_texture(node):
         return False
-    color = PAINT_COLOR if use_legacy_vehicle_black_cutout() else vehicle_paint_tone_color()
+    color = vehicle_paint_tone_color()
     force_input(node, "Base Color", color)
     material_obj.diffuse_color = color
     return True
@@ -1494,87 +1425,6 @@ def tune_semantic_materials(enable_emission=True):
                 set_input(node, "Roughness", 0.12)
                 set_input(node, "Metallic", 0.0)
                 set_first_input(node, ("Specular IOR Level", "Specular"), 0.72)
-            changed += 1
-    return changed
-
-
-def tune_legacy_vehicle_black_semantic_materials():
-    changed = 0
-    for material_obj in bpy.data.materials:
-        semantic = material_semantic(material_obj.name)
-        if not semantic or semantic == "glass":
-            continue
-        material_obj.use_nodes = True
-        color = semantic_color(material_obj.name, semantic)
-        for node in material_obj.node_tree.nodes:
-            if node.bl_idname != "ShaderNodeBsdfPrincipled":
-                continue
-            model_toned = apply_untextured_model_tone(material_obj, node)
-            if not model_toned and color and not base_color_has_upstream_texture(node):
-                force_input(node, "Base Color", color)
-                material_obj.diffuse_color = color
-            if semantic == "rubber":
-                set_input(node, "Roughness", 0.78)
-                set_input(node, "Metallic", 0.0)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.32)
-            elif semantic == "brake":
-                set_input(node, "Roughness", 0.48)
-                set_input(node, "Metallic", 0.35)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.55)
-            elif semantic == "chrome":
-                if not model_toned and material_uses_generic_tiny_texture(material_obj, ("chrome", "vehicle_generic_smallspecmap")):
-                    chrome_fallback = LEGACY_VEHICLE_BLACK_CHROME_COLOR
-                    force_input(node, "Base Color", chrome_fallback)
-                    material_obj.diffuse_color = chrome_fallback
-                    force_input(node, "Roughness", 0.50)
-                    force_input(node, "Metallic", 0.04)
-                    force_input(node, "Specular IOR Level", 0.34)
-                    force_input(node, "Specular", 0.34)
-                    force_input(node, "Coat Weight", 0.06)
-                    force_input(node, "Coat Roughness", 0.26)
-                else:
-                    set_input(node, "Roughness", 0.08)
-                    set_input(node, "Metallic", 0.85)
-                    set_first_input(node, ("Specular IOR Level", "Specular"), 0.82)
-                    set_input(node, "Coat Weight", 0.35)
-            elif semantic == "paint":
-                if not model_toned and is_catalog_paint_slot(material_obj.name) and not material_has_renderer_color_texture(material_obj):
-                    force_input(node, "Base Color", LEGACY_VEHICLE_BLACK_PAINT_COLOR)
-                    material_obj.diffuse_color = LEGACY_VEHICLE_BLACK_PAINT_COLOR
-                    force_input(node, "Roughness", 0.42)
-                    force_input(node, "Specular IOR Level", 0.42)
-                    force_input(node, "Specular", 0.42)
-                    force_input(node, "Coat Weight", 0.22)
-                    force_input(node, "Coat Roughness", 0.20)
-                else:
-                    set_input(node, "Roughness", 0.28)
-                    set_first_input(node, ("Specular IOR Level", "Specular"), 0.64)
-                    set_input(node, "Coat Weight", 0.42)
-                    set_input(node, "Coat Roughness", 0.14)
-                set_input(node, "Metallic", 0.0)
-            elif semantic == "metal":
-                set_input(node, "Roughness", 0.28)
-                set_input(node, "Metallic", 0.72)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.72)
-                set_input(node, "Coat Weight", 0.25)
-            elif semantic == "carbon":
-                set_input(node, "Roughness", 0.24)
-                set_input(node, "Metallic", 0.0)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.75)
-                set_input(node, "Coat Weight", 0.65)
-                set_input(node, "Coat Roughness", 0.08)
-            elif semantic in ("plastic", "leather", "fabric"):
-                set_input(node, "Roughness", 0.52 if semantic == "plastic" else 0.72)
-                set_input(node, "Metallic", 0.0)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.42)
-            elif semantic == "light":
-                light_color = current_material_color(material_obj, node)
-                if should_emit_material(material_obj.name):
-                    strength = 2.4 if is_police_light_name(material_obj.name) else 1.15
-                    set_emission_inputs(material_obj, node, light_color, strength)
-                set_input(node, "Roughness", 0.12)
-                set_input(node, "Metallic", 0.0)
-                set_first_input(node, ("Specular IOR Level", "Specular"), 0.85)
             changed += 1
     return changed
 
@@ -1860,20 +1710,14 @@ def bind_extracted_textures(job):
     generic_links = bind_generic_asset_texture(texture_index, texture_manifest, job)
     part_links = bind_untextured_materials(texture_index, texture_manifest)
     window_tunes = tune_window_materials()
-    if use_legacy_vehicle_black_cutout():
-        paint_tones = apply_vehicle_paint_tones()
-        black_texture_tones = apply_vehicle_black_texture_tones()
-        surface_tunes = tune_legacy_vehicle_black_semantic_materials()
-    else:
-        paint_tones = apply_vehicle_paint_tones()
-        black_texture_tones = 0
-        surface_tunes = tune_semantic_materials(bool(job.get("special_lights", True)))
+    paint_tones = apply_vehicle_paint_tones()
+    surface_tunes = tune_semantic_materials(bool(job.get("special_lights", True)))
     dump_wheel_materials()
     print(
         f"Texture bind matched: {matched}, missing: {len(missing)}, "
         f"livery_links: {livery_links}, generic_links: {generic_links}, part_links: {part_links}, "
         f"window_tunes: {window_tunes}, surface_tunes: {surface_tunes}, "
-        f"paint_tones: {paint_tones}, black_texture_tones: {black_texture_tones}. "
+        f"paint_tones: {paint_tones}. "
         "Material parameters preserved."
     )
     write_texture_bind_report(
@@ -2215,7 +2059,20 @@ def green_key_alpha(r, g, b, threshold):
     return 1.0 - ((dominance - (threshold - soft)) / soft)
 
 
-def process_green_image(input_path, output_path, threshold=70, padding=0):
+def minimum_output_dimensions(width, height, min_width=0, min_height=0):
+    width = max(int(width), 1)
+    height = max(int(height), 1)
+    min_width = max(int(min_width), 0)
+    min_height = max(int(min_height), 0)
+    scale = max(
+        1.0,
+        min_width / width if min_width else 1.0,
+        min_height / height if min_height else 1.0,
+    )
+    return math.ceil(width * scale), math.ceil(height * scale)
+
+
+def process_green_image(input_path, output_path, threshold=70, padding=0, min_width=0, min_height=0):
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2270,21 +2127,28 @@ def process_green_image(input_path, output_path, threshold=70, padding=0):
         cutout = bpy.data.images.new("vehicle_renderer_cutout", width=out_w, height=out_h, alpha=True)
         cutout.pixels.foreach_set(out_pixels)
 
+    target_width, target_height = minimum_output_dimensions(*cutout.size, min_width, min_height)
+    if (target_width, target_height) != tuple(cutout.size):
+        cutout.scale(target_width, target_height)
     cutout.filepath_raw = str(output_path)
     cutout.file_format = "PNG"
     cutout.save()
     bpy.data.images.remove(image)
     bpy.data.images.remove(cutout)
-    print(f"Green key: {input_path} -> {output_path}")
+    print(f"Green key: {input_path} -> {output_path} ({target_width}x{target_height})")
 
 
-def save_image(path, width, height, pixels, name):
+def save_image(path, width, height, pixels, name, min_width=0, min_height=0):
     image = bpy.data.images.new(name, width=width, height=height, alpha=True)
     image.pixels.foreach_set(pixels)
+    target_width, target_height = minimum_output_dimensions(width, height, min_width, min_height)
+    if (target_width, target_height) != (width, height):
+        image.scale(target_width, target_height)
     image.filepath_raw = str(path)
     image.file_format = "PNG"
     image.save()
     bpy.data.images.remove(image)
+    return target_width, target_height
 
 
 def percentile(values, ratio):
@@ -2320,7 +2184,15 @@ def normalize_alpha(alpha, background_alpha):
     return 0.0 if normalized <= 0.035 else normalized
 
 
-def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0, crop=True):
+def save_green_preview_and_cutout(
+    alpha_path,
+    green_path,
+    cutout_path,
+    padding=0,
+    crop=True,
+    min_width=0,
+    min_height=0,
+):
     alpha_path = Path(alpha_path).resolve()
     green_path = Path(green_path).resolve()
     cutout_path = Path(cutout_path).resolve()
@@ -2388,9 +2260,8 @@ def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0
                 max_x = max(max_x, x)
                 max_y = max(max_y, y)
 
-
     if max_x < min_x or max_y < min_y:
-        save_image(cutout_path, 1, 1, [0.0, 0.0, 0.0, 0.0], "vehicle_renderer_empty_alpha_cutout")
+        save_image(cutout_path, 1, 1, [0.0, 0.0, 0.0, 0.0], "vehicle_renderer_empty_alpha_cutout", min_width, min_height)
         return
 
     min_x = max(min_x - padding, 0)
@@ -2411,25 +2282,25 @@ def save_green_preview_and_cutout(alpha_path, green_path, cutout_path, padding=0
                 r = g = b = 0.0
             out_pixels[dst_idx : dst_idx + 4] = [r, g, b, a]
 
-    save_image(cutout_path, out_w, out_h, out_pixels, "vehicle_renderer_alpha_cutout")
+    final_width, final_height = save_image(cutout_path, out_w, out_h, out_pixels, "vehicle_renderer_alpha_cutout", min_width, min_height)
     print(f"Green preview: {alpha_path} -> {green_path}")
-    print(f"Alpha cutout: {alpha_path} -> {cutout_path} (background_alpha={background_alpha:.4f})")
+    print(f"Alpha cutout: {alpha_path} -> {cutout_path} ({out_w}x{out_h} -> {final_width}x{final_height}, background_alpha={background_alpha:.4f})")
 
 
-def process_green_tree(input_path, output_path, threshold=70, padding=0):
+def process_green_tree(input_path, output_path, threshold=70, padding=0, min_width=0, min_height=0):
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
     if input_path.is_file():
         if output_path.suffix.lower() != ".png":
             output_path.mkdir(parents=True, exist_ok=True)
             output_path = output_path / input_path.name
-        process_green_image(input_path, output_path, threshold, padding)
+        process_green_image(input_path, output_path, threshold, padding, min_width, min_height)
         return
 
     output_path.mkdir(parents=True, exist_ok=True)
     for path in sorted(input_path.rglob("*.png")):
         rel = path.relative_to(input_path)
-        process_green_image(path, output_path / rel, threshold, padding)
+        process_green_image(path, output_path / rel, threshold, padding, min_width, min_height)
 
 
 def main():
@@ -2440,6 +2311,8 @@ def main():
             args["key_output"],
             int(args.get("key_threshold", 70)),
             int(args.get("key_padding", 12)),
+            int(args.get("cutout_width", 0)),
+            int(args.get("cutout_height", 0)),
         )
         return
 
@@ -2481,7 +2354,9 @@ def main():
             output_path,
             job.get("green_screen_path") or output_path,
             job["cutout_path"],
-            int(job.get("key_padding", 12)),
+            padding=int(job.get("key_padding", 12)),
+            min_width=int(job.get("cutout_width", 0)),
+            min_height=int(job.get("cutout_height", 0)),
         )
 
 

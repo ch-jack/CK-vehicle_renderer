@@ -108,6 +108,7 @@ _vehicle_renders\model.png
 ```powershell
 --key-padding 12
 ```
+需要设定裁切 PNG 的最小分辨率时使用 `--cutout-width` 和 `--cutout-height`；任一边不足会等比放大，不会缩小已有大图。
 
 车辆、武器、饰品及其他模型统一按实际投影边界自适应取景，只保留防止零尺寸的极小下限。
 
@@ -151,6 +152,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 --force
 --skip-existing
 --width 1600 --height 1000
+--cutout-width 1920 --cutout-height 1080
 --yaw 135 --elevation 26
 --floor-gap 0.2
 --model-tone gray
@@ -160,7 +162,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 --key-padding 0
 ```
 
-`--model-tone gray/white` 只调整车辆原生主色、副色和珠光车漆层，不覆盖漫反射贴图；`black` 会先把原生主/副车漆设为黑色，再保留旧版外观纹理明暗乘算，避免不透明白色外观贴图残留，因此不是严格的“只改车漆”。玻璃、灯光、轮胎、轮毂、内饰和贴花不参与白/灰改色。
+`--model-tone gray/white/black` 都只调整车辆原生主色、副色、珠光和明确的车漆材质，不覆盖或暗化漫反射贴图。玻璃、灯光、轮胎、轮毂、金属、碳纤维、塑料、内饰和贴花不参与改色。
 
 Cycles 渲染前会把 Sollumz 数值参数烘焙为标准 Blender 节点常量，已有 Base Color 上游贴图链不会被补图逻辑覆盖。武器材质若把 `_dpal` / palette / tint 调色板误接到 Base Color，会改用本地漫反射贴图（例如 `map.png`）；`_nm` / `_spec` 按 Non-Color 数据读取。
 
