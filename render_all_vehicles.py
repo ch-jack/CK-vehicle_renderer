@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from vehicle_assembly import build_assembly_plan, parse_vehicle_models, vehicle_resource_root
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TOOLS_DIR = SCRIPT_DIR / "tools"
@@ -81,7 +83,7 @@ def clean_model_name(asset: Path) -> str:
 
 
 def path_is_generated_output(path: Path) -> bool:
-    generated = {"_vehicle_renders", "_work", "_archive_unpacked", "_rpf_unpacked"}
+    generated = {"_vehicle_renders", "_assembled_blender", "_work", "_archive_unpacked", "_rpf_unpacked"}
     return any(part.lower() in generated for part in path.parts)
 
 
@@ -94,9 +96,18 @@ def selected_model_matches(asset: Path, selected_models: set[str] | None) -> boo
 def scan_vehicle_yfts(root: Path, selected_models: set[str] | None) -> list[Path]:
     all_yfts = [p for p in root.rglob("*.yft") if p.is_file() and not path_is_generated_output(p)]
     by_model: dict[str, dict[str, Path]] = {}
+    resource_models: dict[Path, set[str] | None] = {}
     for yft in all_yfts:
         model = clean_model_name(yft)
         if selected_models and model.lower() not in selected_models:
+            continue
+        source_dir = yft.parent.resolve()
+        if source_dir not in resource_models:
+            resource_root = vehicle_resource_root(source_dir)
+            metadata_models = parse_vehicle_models(resource_root, source_dir) if resource_root else []
+            resource_models[source_dir] = {name.lower() for name in metadata_models} if metadata_models else None
+        metadata_models = resource_models[source_dir]
+        if metadata_models is not None and model.lower() not in metadata_models:
             continue
         slot = by_model.setdefault(model.lower(), {})
         if yft.stem.lower().endswith("_hi"):
@@ -108,7 +119,6 @@ def scan_vehicle_yfts(root: Path, selected_models: set[str] | None) -> list[Path
     for item in by_model.values():
         result.append(item.get("hi") or item["base"])
     return sorted(result, key=lambda p: (str(p.parent).lower(), clean_model_name(p).lower()))
-
 
 def scan_hi_preferred_assets(root: Path, extension: str, selected_models: set[str] | None) -> list[Path]:
     all_assets = [p for p in root.rglob(f"*{extension}") if p.is_file() and not path_is_generated_output(p)]
@@ -407,7 +417,10 @@ def safe_folder_name(path: Path) -> str:
 
 def unpack_archives(input_dir: Path, work_dir: Path, archive_tool: Path | None) -> list[Path]:
     roots: list[Path] = []
-    archives = [p for p in input_dir.rglob("*") if p.is_file() and p.suffix.lower() in ARCHIVE_EXTENSIONS]
+    if input_dir.is_file() and input_dir.suffix.lower() in ARCHIVE_EXTENSIONS:
+        archives = [input_dir]
+    else:
+        archives = [p for p in input_dir.rglob("*") if p.is_file() and p.suffix.lower() in ARCHIVE_EXTENSIONS]
     if not archives:
         return roots
     if not archive_tool:
@@ -586,6 +599,24 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
     model = clean_model_name(asset)
     source_dir = asset.parent.resolve()
     ytd_names = tuple(matching_ytds(source_dir, model, args.ytd_mode))
+    resource_root = vehicle_resource_root(source_dir) if asset_kind == "vehicle" else None
+    assembly_plan: dict[str, object] = {"enabled": False, "mode": "none", "parts": []}
+    if resource_root is not None:
+        base_models = {name.lower() for name in parse_vehicle_models(resource_root, source_dir)}
+        if model.lower() in base_models:
+            assembly_plan = build_assembly_plan(
+                resource_root,
+                source_dir,
+                model,
+                mode=args.vehicle_assembly,
+                requested_kit=args.vehicle_kit,
+                mod_specs=args.vehicle_mod,
+            )
+            if assembly_plan.get("enabled"):
+                print(
+                    f"[assembly] {model}: mode={assembly_plan['mode']} "
+                    f"parts={len(assembly_plan['parts'])} kit={assembly_plan.get('kit') or '-'}"
+                )
     exposure = args.exposure
     world_strength = args.world_strength
     light_scale = args.light_scale
@@ -621,6 +652,9 @@ def write_job_file(args, asset: Path, asset_kind: str, jobs_dir: Path, logs_dir:
         "source_dir": str(source_dir),
         "asset_name": asset.name,
         "yft_name": asset.name,
+        "resource_root": str(resource_root) if resource_root else "",
+        "vehicle_assembly": assembly_plan,
+        "vehicle_attach": args.vehicle_attach,
         "ytd_names": list(ytd_names),
         "shared_ytd_paths": [str(p) for p in args.shared_ytd_paths],
         "texture_dir": str(texture_dir.resolve()),
@@ -852,6 +886,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=default_workers(), help="Parallel Blender process count.")
     parser.add_argument("--model", action="append", default=[], help="Only render this model/asset name. Can be repeated.")
     parser.add_argument("--asset-types", default="all", help="Comma list: all,vehicle,drawable,drawable-dict,map,weapon,prop,accessory.")
+    parser.add_argument(
+        "--vehicle-assembly",
+        "--assembly-mode",
+        dest="vehicle_assembly",
+        choices=("auto", "showcase", "all", "none"),
+        default="auto",
+        help="Assemble carcols.meta vehicle parts. Auto uses showcase when a mod kit is present.",
+    )
+    parser.add_argument("--vehicle-mod", "--assembly-mod", dest="vehicle_mod", action="append", default=[], help="Explicit assembly model or mod type, e.g. VMT_GRILL:2.")
+    parser.add_argument("--vehicle-kit", "--assembly-kit", dest="vehicle_kit", default="", help="carcols.meta kitName override.")
+    parser.add_argument("--vehicle-attach", "--assembly-attach", dest="vehicle_attach", choices=("preserve", "none"), default="preserve", help="Attach assembled parts to base bones while preserving world transforms.")
     parser.add_argument("--blender", default="", help="Path to blender.exe. Otherwise BLENDER_EXE is used.")
     parser.add_argument("--sollumz", default="", help="Path to Sollumz addon folder if it is not installed.")
     parser.add_argument("--blender-user-config", default="", help="Optional isolated Blender user config folder.")
@@ -947,7 +992,8 @@ def main(argv: list[str]) -> int:
         args.blender_user_scripts = str(local_scripts)
 
     blender = find_blender(args.blender)
-    out_dir = Path(args.out).resolve() if args.out else input_dir / "_vehicle_renders"
+    default_out_root = input_dir.parent if input_dir.is_file() else input_dir
+    out_dir = Path(args.out).resolve() if args.out else default_out_root / "_vehicle_renders"
     out_dir.mkdir(parents=True, exist_ok=True)
     jobs_dir = out_dir / "_jobs"
     logs_dir = out_dir / "_logs"
@@ -971,10 +1017,14 @@ def main(argv: list[str]) -> int:
         else []
     )
 
-    temp_root_obj = tempfile.TemporaryDirectory(prefix="vehicle_renderer_")
-    temp_root = Path(temp_root_obj.name)
+    temp_root_obj = None
+    if args.keep_work:
+        temp_root = Path(tempfile.mkdtemp(prefix="vehicle_renderer_"))
+    else:
+        temp_root_obj = tempfile.TemporaryDirectory(prefix="vehicle_renderer_")
+        temp_root = Path(temp_root_obj.name)
 
-    scan_roots = [input_dir]
+    scan_roots = [] if input_dir.is_file() else [input_dir]
     if not args.no_unpack:
         archive_tool = find_archive_tool(args.archive_tool)
         scan_roots.extend(unpack_archives(input_dir, temp_root, archive_tool))
@@ -1056,7 +1106,7 @@ def main(argv: list[str]) -> int:
             shutil.rmtree(kept)
         shutil.move(str(temp_root), str(kept))
         print(f"Work folder kept: {kept}")
-    else:
+    elif temp_root_obj is not None:
         temp_root_obj.cleanup()
 
     print(f"Done. OK={len(jobs) - len(failures)} FAIL={len(failures)}")

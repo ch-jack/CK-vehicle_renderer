@@ -229,3 +229,37 @@ D:\fivem\ck_free_toolbox\start_toolbox.cmd
 ```
 
 工具箱不使用后端服务。它在本机客户端里扫描所有模型资源，启动 `render_all_vehicles.py`、读取日志并更新进度。第一页签是“模型自动截图”，渲染命令使用 `--asset-types all`；默认输入为 `D:\fivem\TestVeh`，默认输出为 `D:\fivem\TestVeh\_vehicle_renders`。
+
+## 载具自动拼装
+
+载具资源同时包含 `vehicles.meta`、`carvariations.meta`、`carcols.meta` 和多个分离 `.yft` 时，默认 `--vehicle-assembly auto` 会：
+
+1. 从元数据确认基车，避免把轮拱、Logo、内饰和改装件当成独立载具截图。
+2. 从 `carvariations.meta` 找到对应 kit。
+3. 从 `carcols.meta` 读取 `visibleMods`、`linkedModels`、`type`、`bone` 和 `turnOffBones`。
+4. 每种 `VMT_*` 部位只选择一个方案，关联件一起显示；被该方案替换的基车零件关闭，其他可显示 extras 保留。带贴图、特效或发光的零件和图案全部保留；特效壳和投影平面按透明 PNG 图层显示，使用原 Alpha 或贴图亮度去除黑底，整车覆盖层最大不透明度为 0.15。原生发光保留并限制最高强度为 2.4，避免覆盖车漆纹理。与主 `bodyshell` 尺寸和中心都重叠的实体 `extra_N` 按“同部位只显示一套”去重；`requiredExtras` 和改件正在使用的 extra 不隐藏。
+5. 逐件导入 Sollumz，按基车骨骼挂接，再进入现有贴图、材质、灯光、取景和 PNG 裁切流程。
+
+`LD_Bolide` 实测命令：
+
+```powershell
+python "D:\fivem\vehicle_renderer\render_all_vehicles.py" "D:\fivem\TestVeh\LD_Bolide.zip" --model LD_Bolide --asset-types vehicle --cutout --force --save-blend
+```
+
+![LD_Bolide assembled](images/vehicle_LD_Bolide_assembled.png)
+
+模式和选择参数：
+
+```text
+--vehicle-assembly auto       检测到 kit 时自动使用 showcase，默认
+--vehicle-assembly showcase  每种 VMT_* 类型选择第一个可用方案
+--vehicle-assembly all       导入套件中所有存在的改装模型
+--vehicle-assembly none      不拼装，只渲染基车
+--vehicle-mod VMT_GRILL:2    选择某类改装的第 2 个方案，可重复
+--vehicle-mod LD_Bolide_cb   直接指定模型名，可重复
+--vehicle-kit <kitName>      覆盖 carvariations.meta 中的 kit
+--vehicle-attach preserve    按骨骼挂接并保留资源世界坐标，默认
+--vehicle-attach none        导入部件但不建立骨骼父级
+```
+
+`--save-blend` 会同时输出 `_jobs\模型名.blend`，用于继续在 Blender 中检查或编辑拼装场景。

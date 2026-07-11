@@ -155,7 +155,7 @@ def call_sollumz_operator(name, **kwargs):
     return operator(**filtered)
 
 
-def import_assets(source_dir, names):
+def import_assets(source_dir, names, split_by_group=True):
     names = [name for name in names if name and (source_dir / name).exists()]
     if not names:
         return None
@@ -166,7 +166,7 @@ def import_assets(source_dir, names):
         files=[{"name": name} for name in names],
         use_custom_settings=True,
         import_as_asset=False,
-        split_by_group=True,
+        split_by_group=split_by_group,
         dwd_import_external_skeleton="NO",
         frag_import_vehicle_windows=False,
         ymap_skip_missing_entities=True,
@@ -181,6 +181,349 @@ def import_assets(source_dir, names):
     )
 
 
+def import_asset_sequence(source_dir, names):
+    imported = []
+    failed = []
+    for index, name in enumerate(names):
+        try:
+            # The base vehicle must stay split by bone group so carcols visibility
+            # rules can replace stock parts without hiding the whole vehicle mesh.
+            result = import_assets(source_dir, [name], split_by_group=index == 0)
+            print(f"Assembly import: {name} -> {result}")
+            if result is not None:
+                imported.append(name)
+            else:
+                failed.append(name)
+        except Exception as exc:
+            print(f"Assembly import failed: {name}: {exc}")
+            failed.append(name)
+    if not imported:
+        raise RuntimeError("No assembled vehicle files imported successfully")
+    return {"imported": imported, "failed": failed}
+
+
+def find_model_armature(model_name):
+    direct = bpy.data.objects.get(model_name)
+    if direct and direct.type == "ARMATURE":
+        return direct
+    prefix = f"{model_name}."
+    for obj in bpy.data.objects:
+        if obj.type == "ARMATURE" and obj.name.startswith(prefix):
+            return obj
+    key = model_name.lower()
+    for obj in bpy.data.objects:
+        if obj.type == "ARMATURE" and obj.name.split(".")[0].lower() == key:
+            return obj
+    return None
+
+
+def attach_vehicle_assembly(plan, attach_mode):
+    if attach_mode == "none":
+        return 0
+    if attach_mode != "preserve":
+        raise RuntimeError(f"Unknown vehicle assembly attach mode: {attach_mode}")
+    base_model = str(plan.get("base_model", ""))
+    base = find_model_armature(base_model)
+    if base is None:
+        print(f"Assembly attach skipped: base armature not found: {base_model}")
+        return 0
+    attached = 0
+    for part in plan.get("parts", []):
+        model = str(part.get("model", ""))
+        if not model or model.lower() == base_model.lower():
+            continue
+        armature = find_model_armature(model)
+        if armature is None:
+            print(f"Assembly part armature missing: {model}")
+            continue
+        bone_name = str(part.get("bone", "")) or "chassis"
+        if bone_name not in base.data.bones:
+            print(f"Assembly bone missing: model={model} bone={bone_name}")
+            continue
+        original_world = armature.matrix_world.copy()
+        armature.parent = base
+        armature.parent_type = "BONE"
+        armature.parent_bone = bone_name
+        armature.matrix_world = original_world
+        attached += 1
+        print(f"Assembly attached: model={model} bone={bone_name} type={part.get('type', '-')}")
+    return attached
+
+
+def normalized_object_name(value):
+    name = str(value or "").strip().lower()
+    if re.search(r"\.\d{3}$", name):
+        name = name[:-4]
+    return name
+
+
+def mesh_armature(obj):
+    for modifier in obj.modifiers:
+        if modifier.type == "ARMATURE" and modifier.object is not None:
+            return modifier.object
+    return None
+
+
+def is_auxiliary_pattern_mesh(obj):
+    names = {normalized_object_name(obj.name)}
+    names.update(normalized_object_name(group.name) for group in obj.vertex_groups)
+    if not any(name.endswith("_rgb") for name in names):
+        return False
+    material_names = [normalized_object_name(material.name) for material in obj.data.materials if material]
+    return any(
+        "flashing_pattern" in name or "flashing_pater" in name
+        for name in material_names
+    )
+
+
+def world_box_center_and_size(obj):
+    points = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    min_v = Vector(tuple(min(point[i] for point in points) for i in range(3)))
+    max_v = Vector(tuple(max(point[i] for point in points) for i in range(3)))
+    return (min_v + max_v) * 0.5, max_v - min_v
+
+
+def auxiliary_pattern_targets(obj):
+    name = normalized_object_name(obj.name)
+    if not name.endswith("_rgb"):
+        return []
+    key = name[:-4]
+    if key.startswith("ka_"):
+        key = key[3:]
+    if key == "body":
+        return ["bodyshell", "chassis", "mod_a"]
+    if key == "boot":
+        return ["boot"]
+    if key.startswith("door_"):
+        return [key]
+    if key in {"lf", "lr", "rf", "rr"}:
+        return [f"hub_{key}", f"wheel_{key}.child", f"wheel_{key}"]
+    return []
+
+
+def align_auxiliary_pattern_meshes(base):
+    base_meshes = [
+        obj
+        for obj in bpy.data.objects
+        if obj.type == "MESH" and mesh_armature(obj) == base and not obj.hide_render
+    ]
+    by_name = {normalized_object_name(obj.name): obj for obj in base_meshes}
+    aligned = []
+    for obj in base_meshes:
+        if not is_auxiliary_pattern_mesh(obj):
+            continue
+        target = next(
+            (by_name[name] for name in auxiliary_pattern_targets(obj) if name in by_name),
+            None,
+        )
+        if target is None or target == obj:
+            continue
+        source_center, _ = world_box_center_and_size(obj)
+        target_center, target_size = world_box_center_and_size(target)
+        delta = target_center - source_center
+        shift = Vector(
+            tuple(
+                delta[axis]
+                if abs(delta[axis]) > max(target_size[axis] * 0.4, 0.6)
+                else 0.0
+                for axis in range(3)
+            )
+        )
+        if shift.length <= 0.001:
+            continue
+        obj.matrix_world.translation += shift
+        aligned.append(
+            {
+                "object": obj.name,
+                "target": target.name,
+                "shift": tuple(round(value, 4) for value in shift),
+            }
+        )
+    bpy.context.view_layer.update()
+    print(f"Vehicle auxiliary patterns aligned: {aligned}")
+    return aligned
+
+
+def is_detached_effect_shell(obj):
+    material_names = [
+        normalized_object_name(material.name)
+        for material in obj.data.materials
+        if material
+    ]
+    return any(
+        hint in name
+        for name in material_names
+        for hint in ("ka_sd", "xkbody", "flashing_pattern", "flashing_pater")
+    )
+
+
+def align_detached_effect_shells(base, plan):
+    base_meshes = [
+        obj
+        for obj in bpy.data.objects
+        if obj.type == "MESH" and mesh_armature(obj) == base and not obj.hide_render
+    ]
+    target = next(
+        (obj for name in ("bodyshell", "chassis") for obj in base_meshes if normalized_object_name(obj.name) == name),
+        None,
+    )
+    if target is None:
+        return []
+
+    target_center, target_size = world_box_center_and_size(target)
+    part_groups = {}
+    for part in plan.get("parts", []):
+        mod_type = str(part.get("type", ""))
+        model = str(part.get("model", ""))
+        if not model or mod_type == "BASE":
+            continue
+        armature = find_model_armature(model)
+        if armature is not None:
+            part_groups.setdefault(mod_type, []).append(armature)
+
+    aligned = []
+    for mod_type, armatures in part_groups.items():
+        meshes = [
+            obj
+            for obj in bpy.data.objects
+            if obj.type == "MESH"
+            and not obj.hide_render
+            and mesh_armature(obj) in armatures
+        ]
+        shells = []
+        for obj in meshes:
+            center, size = world_box_center_and_size(obj)
+            if (
+                is_detached_effect_shell(obj)
+                and max(size) > 4.0
+                and 0.7 <= size.x / max(target_size.x, 0.01) <= 1.35
+                and 0.7 <= size.y / max(target_size.y, 0.01) <= 1.35
+            ):
+                shells.append((obj, center, size))
+        if not shells:
+            continue
+
+        shell, source_center, _ = max(shells, key=lambda item: max(item[2]))
+        delta = target_center - source_center
+        shift = Vector(
+            tuple(
+                delta[axis]
+                if abs(delta[axis]) > max(target_size[axis] * 0.4, 0.6)
+                else 0.0
+                for axis in range(3)
+            )
+        )
+        if shift.length <= 0.001:
+            continue
+        for obj in meshes:
+            obj.matrix_world.translation += shift
+        aligned.append(
+            {
+                "type": mod_type,
+                "shell": shell.name,
+                "objects": len(meshes),
+                "shift": tuple(round(value, 4) for value in shift),
+            }
+        )
+
+    bpy.context.view_layer.update()
+    print(f"Vehicle detached effect shells aligned: {aligned}")
+    return aligned
+
+
+def hide_overlapping_body_extras(base, protected_extras):
+    base_meshes = [
+        obj
+        for obj in bpy.data.objects
+        if obj.type == "MESH" and mesh_armature(obj) == base and not obj.hide_render
+    ]
+    body = next(
+        (obj for obj in base_meshes if normalized_object_name(obj.name) == "bodyshell"),
+        None,
+    )
+    if body is None:
+        return []
+    body_center, body_size = world_box_center_and_size(body)
+    hidden = []
+    for obj in base_meshes:
+        name = normalized_object_name(obj.name)
+        if not re.fullmatch(r"extra_\d+", name) or name in protected_extras:
+            continue
+        center, size = world_box_center_and_size(obj)
+        ratios = tuple(size[axis] / max(body_size[axis], 0.01) for axis in range(3))
+        overlaps_center = all(
+            abs(center[axis] - body_center[axis]) <= max(body_size[axis] * 0.55, 0.35)
+            for axis in range(3)
+        )
+        if not overlaps_center or not all(0.75 <= ratio <= 1.35 for ratio in ratios):
+            continue
+        obj.hide_render = True
+        obj.hide_viewport = True
+        hidden.append({"object": obj.name, "reason": "duplicate-body-extra"})
+    if hidden:
+        print(f"Vehicle duplicate body extras hidden: {[item['object'] for item in hidden]}")
+    return hidden
+
+
+def apply_vehicle_visibility(plan):
+    base_model = str(plan.get("base_model", ""))
+    base = find_model_armature(base_model)
+    if base is None:
+        print(f"Vehicle visibility skipped: base armature not found: {base_model}")
+        return []
+
+    disabled = {
+        normalized_object_name(name)
+        for name in plan.get("disabled_bones", [])
+        if normalized_object_name(name)
+    }
+    required_extras = {
+        normalized_object_name(name)
+        for name in plan.get("required_extras", [])
+        if normalized_object_name(name)
+    }
+    selected_extra_bones = {
+        normalized_object_name(part.get("bone", ""))
+        for part in plan.get("parts", [])
+        if re.fullmatch(r"extra_\d+", normalized_object_name(part.get("bone", "")))
+    }
+    protected_extras = required_extras | selected_extra_bones
+
+    hidden = []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or mesh_armature(obj) != base:
+            continue
+        object_name = normalized_object_name(obj.name)
+        groups = {
+            normalized_object_name(group.name)
+            for group in obj.vertex_groups
+            if normalized_object_name(group.name)
+        }
+
+        reason = ""
+        if object_name in disabled or (groups and groups <= disabled):
+            reason = "turnOffBones"
+
+        if not reason:
+            continue
+        obj.hide_render = True
+        obj.hide_viewport = True
+        hidden.append({"object": obj.name, "reason": reason})
+
+    hidden.extend(hide_overlapping_body_extras(base, protected_extras))
+    aligned = align_auxiliary_pattern_meshes(base)
+    aligned.extend(align_detached_effect_shells(base, plan))
+    counts = {}
+    for item in hidden:
+        counts[item["reason"]] = counts.get(item["reason"], 0) + 1
+    print(
+        f"Vehicle visibility: hidden={len(hidden)} reasons={counts} "
+        f"disabled_bones={sorted(disabled)} required_extras={sorted(required_extras)} "
+        f"aligned_patterns={len(aligned)}"
+    )
+    return hidden
+
+
 def normalized_texture_name(value):
     if not value:
         return ""
@@ -189,8 +532,12 @@ def normalized_texture_name(value):
         if name.lower().endswith(ext):
             name = name[: -len(ext)]
             break
-    name = re.sub(r"\s+\[[^\]]+\]$", "", name)
-    name = re.sub(r"\.\d{3}$", "", name)
+    while True:
+        cleaned = re.sub(r"\.\d{3}$", "", name)
+        cleaned = re.sub(r"\s+\[[^\]]+\]$", "", cleaned)
+        if cleaned == name:
+            break
+        name = cleaned
     return name.lower()
 
 
@@ -725,9 +1072,9 @@ def vehicle_model_tone_factor(name):
     key = normalized_texture_name(name)
     if ASSET_KIND != "vehicle" or MODEL_TONE not in MODEL_TONE_PALETTE:
         return 0.0
-    if not key or "pearlescent" in raw or protected_vehicle_model_tone_material(name):
+    if not key or protected_vehicle_model_tone_material(name):
         return 0.0
-    if "[primary]" in raw or "[secondary]" in raw:
+    if any(tag in raw for tag in ("[primary]", "[secondary]", "[pearlescent]")):
         return 1.0
     if key.isdigit() or key == "matte":
         return 1.0
@@ -766,6 +1113,21 @@ def vehicle_material_uses_paint_tone(material_obj):
     return vehicle_model_tone_factor(material_obj.name) > 0.0
 
 
+def apply_direct_vehicle_paint_color(material_obj, color):
+    updated = False
+    for node in material_obj.node_tree.nodes:
+        if node.bl_idname != "ShaderNodeBsdfPrincipled":
+            continue
+        base = node.inputs.get("Base Color")
+        if base is None or base.is_linked:
+            continue
+        base.default_value = color
+        updated = True
+    if updated:
+        material_obj.diffuse_color = color
+    return updated
+
+
 def apply_vehicle_paint_tones():
     if ASSET_KIND != "vehicle" or MODEL_TONE not in MODEL_TONE_PALETTE:
         return 0
@@ -778,7 +1140,7 @@ def apply_vehicle_paint_tones():
         diffuse = nodes.get("matDiffuseColor")
         paint_layer = vehicle_material_paint_layer(material_obj)
         updated = False
-        if paint_layer in VEHICLE_BODY_PAINT_LAYERS:
+        if paint_layer in VEHICLE_BODY_PAINT_LAYERS or vehicle_model_tone_factor(material_obj.name) > 0.0:
             for layer in range(1, 8):
                 layer_node = nodes.get(f"PreviewBodyColor{layer}")
                 if layer_node is None or len(layer_node.inputs) < 3:
@@ -792,6 +1154,7 @@ def apply_vehicle_paint_tones():
                 updated = True
             except Exception:
                 pass
+        updated = apply_direct_vehicle_paint_color(material_obj, color) or updated
         if updated:
             changed.append(material_obj.name)
     if changed:
@@ -1170,7 +1533,7 @@ def is_light_like_material_name(name):
     key = normalized_texture_name(name)
     tokens = [token for token in re.split(r"[^a-z0-9]+", key.replace("_", " ")) if token]
     joined = "_".join(tokens)
-    if any(hint in key for hint in ("emiss", "emission", "emit", "headlamp", "headlight", "rearlight", "taillight", "lightbar", "light_bar", "siren", "beacon", "strobe", "neon")):
+    if any(hint in key for hint in ("emiss", "emission", "emit", "headlamp", "headlight", "rearlight", "taillight", "lightbar", "light_bar", "siren", "beacon", "strobe", "flashing", "neon")):
         return True
     if any(token in {"indicator", "signal", "turn"} for token in tokens):
         return True
@@ -1278,7 +1641,7 @@ def light_effect_color(name):
 
 def is_police_light_name(name):
     key = normalized_texture_name(name)
-    return any(hint in key for hint in ("siren", "police", "lightbar", "light_bar", "beacon", "strobe"))
+    return any(hint in key for hint in ("siren", "police", "lightbar", "light_bar", "beacon", "strobe", "flashing"))
 
 
 def is_self_emissive_name(name):
@@ -1348,6 +1711,143 @@ def apply_untextured_model_tone(material_obj, node):
     force_input(node, "Base Color", color)
     material_obj.diffuse_color = color
     return True
+
+
+def image_has_useful_alpha(image):
+    if image is None or getattr(image, "channels", 0) < 4:
+        return False
+    try:
+        pixels = image.pixels
+        pixel_count = len(pixels) // 4
+        step = max(pixel_count // 512, 1)
+        return any(pixels[index * 4 + 3] < 0.98 for index in range(0, pixel_count, step))
+    except Exception:
+        return False
+
+
+def is_effect_overlay_material(material_obj):
+    key = normalized_texture_name(material_obj.name)
+    if any(
+        hint in key
+        for hint in (
+            "flashing_pattern",
+            "flashing_pater",
+            "ka_sd",
+            "xkbody",
+            "bodylogo",
+            "tirelogo",
+        )
+    ):
+        return True
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or material_obj.name not in obj.data.materials:
+            continue
+        size = tuple(abs(value) for value in obj.dimensions)
+        if min(size) < 0.01 and max(size) > 1.5:
+            return True
+    return False
+
+
+def is_full_body_overlay_material(material_obj):
+    material_key = normalized_texture_name(material_obj.name)
+    full_body_keys = set()
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        size = sorted(abs(value) for value in obj.dimensions)
+        if size[0] <= 0.1 or size[1] <= 2.0 or size[2] <= 4.0:
+            continue
+        full_body_keys.update(
+            normalized_texture_name(material.name)
+            for material in obj.data.materials
+            if material
+        )
+    return material_key in full_body_keys
+
+
+def tune_effect_overlay_materials():
+    changed = []
+    for material_obj in bpy.data.materials:
+        if not material_obj.node_tree or not is_effect_overlay_material(material_obj):
+            continue
+        nodes = material_obj.node_tree.nodes
+        links = material_obj.node_tree.links
+        if nodes.get("Catalog Effect Transparency") is not None:
+            continue
+        output = next((node for node in nodes if node.bl_idname == "ShaderNodeOutputMaterial"), None)
+        diffuse = next(
+            (
+                node
+                for node in nodes
+                if node.bl_idname == "ShaderNodeTexImage"
+                and normalized_texture_name(node.name) == "diffusesampler"
+                and node.image is not None
+            ),
+            None,
+        )
+        if output is None or diffuse is None:
+            continue
+        surface = output.inputs.get("Surface")
+        if surface is None or not surface.is_linked:
+            continue
+        surface_link = surface.links[0]
+        shader_socket = surface_link.from_socket
+        links.remove(surface_link)
+
+        transparent = nodes.new("ShaderNodeBsdfTransparent")
+        transparent.name = "Catalog Effect Transparent"
+        mixer = nodes.new("ShaderNodeMixShader")
+        mixer.name = "Catalog Effect Transparency"
+        links.new(transparent.outputs["BSDF"], mixer.inputs[1])
+        links.new(shader_socket, mixer.inputs[2])
+
+        mask_socket = None
+        if image_has_useful_alpha(diffuse.image):
+            mask_socket = diffuse.outputs["Alpha"]
+            mask = "alpha"
+        else:
+            luminance = nodes.new("ShaderNodeRGBToBW")
+            luminance.name = "Catalog Effect Luminance Mask"
+            links.new(diffuse.outputs["Color"], luminance.inputs["Color"])
+            mask_socket = luminance.outputs["Val"]
+            mask = "luminance"
+
+        opacity = 0.15 if is_full_body_overlay_material(material_obj) else 1.0
+        if opacity < 1.0:
+            opacity_node = nodes.new("ShaderNodeMath")
+            opacity_node.name = "Catalog Effect Opacity"
+            opacity_node.operation = "MULTIPLY"
+            opacity_node.inputs[1].default_value = opacity
+            links.new(mask_socket, opacity_node.inputs[0])
+            mask_socket = opacity_node.outputs[0]
+        links.new(mask_socket, mixer.inputs[0])
+        links.new(mixer.outputs["Shader"], surface)
+
+        emission_strengths = []
+        for node in nodes:
+            if node.bl_idname != "ShaderNodeEmission":
+                continue
+            strength = node.inputs.get("Strength")
+            if strength is None:
+                continue
+            original_strength = float(strength.default_value)
+            strength.default_value = min(max(original_strength, 0.0), 2.4)
+            emission_strengths.append(original_strength)
+
+        if hasattr(material_obj, "surface_render_method"):
+            material_obj.surface_render_method = "DITHERED"
+        if hasattr(material_obj, "blend_method"):
+            material_obj.blend_method = "HASHED"
+        max_emission = max(emission_strengths, default=0.0)
+        changed.append(
+            f"{material_obj.name}:{mask}:opacity={opacity:.2f}:"
+            f"emission={min(max_emission, 2.4):.2f}"
+        )
+
+    if changed:
+        print(f"Effect overlay transparency: {len(changed)}")
+        print("Effect overlay materials: " + ", ".join(changed))
+    return len(changed)
 
 
 def tune_semantic_materials(enable_emission=True):
@@ -2340,11 +2840,26 @@ def main():
     clear_scene()
 
     asset_name = job.get("asset_name") or job.get("yft_name")
-    import_result = import_assets(source_dir, [asset_name])
+    assembly_plan = job.get("vehicle_assembly") or {}
+    if assembly_plan.get("enabled"):
+        assembly_parts = assembly_plan.get("parts", [])
+        assembly_files = [str(part.get("file", "")) for part in assembly_parts if part.get("file")]
+        print(
+            f"Vehicle assembly: mode={assembly_plan.get('mode')} "
+            f"kit={assembly_plan.get('kit') or '-'} parts={len(assembly_files)}"
+        )
+        import_result = import_asset_sequence(source_dir, assembly_files)
+        attached = attach_vehicle_assembly(assembly_plan, str(job.get("vehicle_attach", "preserve")))
+        print(f"Vehicle assembly attached: {attached}")
+        apply_vehicle_visibility(assembly_plan)
+    else:
+        import_result = import_assets(source_dir, [asset_name])
     print(f"Import result: {import_result}")
 
-    bind_extracted_textures(job)
     bake_sollumz_shader_parameters()
+    bind_extracted_textures(job)
+    overlay_tunes = tune_effect_overlay_materials()
+    print(f"Effect overlays finalized after shader bake: {overlay_tunes}")
     wheels_created = mirror_missing_wheels() if job.get("asset_kind", "vehicle") == "vehicle" else 0
     print(f"Wheel mirror created: {wheels_created}")
 
