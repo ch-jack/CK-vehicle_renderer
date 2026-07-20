@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from render_all_vehicles import (
     RenderJobResult,
     VehicleJob,
+    build_arg_parser,
+    matching_ytds,
     write_model_render_execution_report,
 )
 
@@ -26,13 +28,15 @@ def make_args() -> SimpleNamespace:
         samples=64,
         engine="eevee",
         engine_auto=True,
+        yaw=135.0,
+        yaw_auto=False,
         model_tone="black",
         cutout=True,
         perspective=False,
         timeout=420,
         skip_textures=False,
         texture_format="png",
-        ytd_mode="all",
+        ytd_mode="match",
         shared_ytd_paths=(),
         no_unpack=False,
         keep_work=False,
@@ -149,7 +153,12 @@ class ModelRenderReportTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["outputs"]["final_png"]["height"], 3)
         markdown = paths["latest_markdown"].read_text(encoding="utf-8")
         self.assertIn("\u6a21\u578b\u81ea\u52a8\u622a\u56fe\u6267\u884c\u62a5\u544a", markdown)
+        gallery = paths["latest_html"].read_text(encoding="utf-8")
+        self.assertIn("<table>", gallery)
+        self.assertIn("<img", gallery)
+        self.assertIn("demo.png", gallery)
         self.assertEqual(paths["latest_json"].read_bytes(), paths["history_json"].read_bytes())
+        self.assertEqual(paths["latest_html"].read_bytes(), paths["history_html"].read_bytes())
 
     def test_writes_failure_report_when_scan_creates_no_jobs(self) -> None:
         paths = write_model_render_execution_report(
@@ -181,5 +190,33 @@ class ModelRenderReportTests(unittest.TestCase):
         self.assertEqual(payload["error"], "No renderable assets found.")
 
 
+class YtdMatchingTests(unittest.TestCase):
+    def test_match_mode_uses_exact_and_delimited_companions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in (
+                "bear2.ytd",
+                "bear2_hi.ytd",
+                "bear2_sign_1.ytd",
+                "bear20.ytd",
+                "bear21.ytd",
+                "shared.ytd",
+            ):
+                (root / name).write_bytes(b"ytd")
+
+            self.assertEqual(
+                matching_ytds(root, "bear2", "match"),
+                ["bear2.ytd", "bear2_hi.ytd", "bear2_sign_1.ytd", "shared.ytd"],
+            )
+
+    def test_match_mode_falls_back_when_folder_has_one_dictionary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "resource_textures.ytd").write_bytes(b"ytd")
+            self.assertEqual(matching_ytds(root, "different_model", "match"), ["resource_textures.ytd"])
+
+    def test_parser_defaults_to_match_mode(self) -> None:
+        args = build_arg_parser().parse_args(["C:/models"])
+        self.assertEqual(args.ytd_mode, "match")
 if __name__ == "__main__":
     unittest.main()

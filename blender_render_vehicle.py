@@ -43,6 +43,7 @@ COLOR_TEXTURE_EXCLUDE_HINTS = (
     "mud",
     "glass",
     "window",
+    "boli",
     "wheel",
     "tire",
     "tyre",
@@ -624,6 +625,11 @@ def normalized_texture_name(value):
     return name.lower()
 
 
+def is_glass_like_material_name(name):
+    key = normalized_texture_name(name)
+    return any(hint in key for hint in ("glass", "window", "windscreen", "windshield", "boli"))
+
+
 def build_texture_index(texture_dir):
     root = Path(texture_dir or "")
     if not root.is_dir():
@@ -715,7 +721,7 @@ def fallback_color_for_name(name):
         return "spec", (0.55, 0.55, 0.55, 1.0), True
     if any(hint in lower for hint in ("wheel", "rim", "brake", "disc")):
         return "wheel", (0.018, 0.018, 0.017, 1.0), False
-    if "glass" in lower or "window" in lower:
+    if is_glass_like_material_name(name):
         return "glass", (0.03, 0.07, 0.08, 0.65), False
     if any(hint in lower for hint in ("black", "tyre", "tire", "rubber", "burnt")):
         return "black", (0.015, 0.015, 0.014, 1.0), False
@@ -1845,7 +1851,7 @@ def is_light_like_material_name(name):
 
 def material_semantic(name):
     key = normalized_texture_name(name)
-    if "glass" in key or "window" in key or "windscreen" in key:
+    if is_glass_like_material_name(key):
         return "glass"
     if is_light_like_material_name(key):
         return "light"
@@ -2279,7 +2285,7 @@ def tune_window_materials():
     changed = 0
     for material_obj in bpy.data.materials:
         name = material_obj.name.lower()
-        if not any(hint in name for hint in ("glass", "glasswindows", "windscreen", "window")):
+        if not is_glass_like_material_name(name):
             continue
         material_obj.use_nodes = True
         material_obj.diffuse_color = (0.16, 0.20, 0.22, 0.18)
@@ -2316,6 +2322,7 @@ def is_paint_like_material(name):
         "glass",
         "window",
         "windscreen",
+        "boli",
         "tyre",
         "tire",
         "rubber",

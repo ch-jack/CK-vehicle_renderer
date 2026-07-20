@@ -166,6 +166,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 --model-tone white
 --no-special-lights
 --key-padding 0
+--ytd-mode match
 ```
 
 未传 `--yaw` 时，带同名 YCD 动画的饰品姿态模型使用 155 度正面特写，普通饰品和其他模型保持 135 度；显式传入 `--yaw` 会覆盖自动值。
@@ -188,6 +189,10 @@ _vehicle_renders/
   _logs/model.textures.bind.json
   _texture_report.txt
   _texture_report.json
+  _render_gallery.html
+  _render_report.md
+  _render_report.json
+  _reports/model-render-*.html
 ```
 
 ## 9. 常见问题
@@ -206,7 +211,7 @@ python "D:\fivem\vehicle_renderer\render_all_vehicles.py" "D:\fivem\TestVeh" --a
 
 ### 模型导入失败
 
-看 `_logs\模型名.log`。如果是 Sollumz `[DECOMPRESS_FAILED]`，说明该 `.ydr` 格式当前导入器读不了；工具会记录失败，不会影响其他模型继续渲染。
+看 `_logs\模型名.log`。如果是 Sollumz `[DECOMPRESS_FAILED]`，说明该 `.ydr` 在 CodeWalker/Sollumz 解压阶段失败，通常是文件损坏、不完整或受保护，并非材质或灯光参数问题；工具会记录失败，不会影响其他模型继续渲染。
 
 `[fail] ... rc=2` 是外层脚本发现最终 PNG 不存在后的状态码，不是 Blender 原生错误。新版会在 `[blender-error]` 和 `[fail]` 行直接附带日志里的真实异常，并区分 Blender 未输出和透明图后处理失败；完整信息仍保存在上述模型日志中。
 
@@ -240,7 +245,7 @@ vehicle_renderer\
 D:\fivem\ck_free_toolbox\start_toolbox.cmd
 ```
 
-工具箱不使用后端服务。它在本机客户端里扫描所有模型资源，启动 `render_all_vehicles.py`、读取日志并更新进度。第一页签是“模型自动截图”，渲染命令使用 `--asset-types all`；默认输入为 `D:\fivem\TestVeh`，默认输出为 `D:\fivem\TestVeh\_vehicle_renders`。
+工具箱不使用后端服务。它在本机客户端里扫描所有模型资源，启动 `render_all_vehicles.py`、读取日志并更新进度。第一页签是“模型自动截图”，可按载具、武器或饰品筛选，分类会传给 `--asset-types`；角度预设提供左侧（135 度）、正面（180 度）和反向正面（0 度）。渲染结束会生成带模型名和对应图片的 `_render_gallery.html` 图片表格。默认输入为 `D:\fivem\TestVeh`，默认输出为 `D:\fivem\TestVeh\_vehicle_renders`。
 
 ## 载具自动拼装
 

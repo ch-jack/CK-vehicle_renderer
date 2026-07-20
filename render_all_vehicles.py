@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import errno
+import html
 import json
 import os
 import platform
@@ -368,20 +369,24 @@ def matching_ytds(source_dir: Path, model: str, mode: str) -> list[str]:
     if mode == "all":
         return [p.name for p in ytds]
 
-    prefixes = {
-        model.lower(),
-        f"{model.lower()}+hi",
-        f"{model.lower()}_hi",
+    model_key = model.lower()
+    exact_names = {
+        model_key,
+        f"{model_key}+hi",
+        f"{model_key}_hi",
         "vehshare",
         "vehicle",
         "vehicles",
         "shared",
     }
-    out = []
+    out: list[str] = []
     for ytd in ytds:
         stem = ytd.stem.lower()
-        if stem in prefixes or stem.startswith(model.lower()):
+        suffix = stem[len(model_key) :] if stem.startswith(model_key) else ""
+        if stem in exact_names or suffix.startswith(("_", "+", "-")):
             out.append(ytd.name)
+    if not out and len(ytds) == 1:
+        out.append(ytds[0].name)
     return out
 
 
@@ -986,7 +991,14 @@ def run_blender_job(blender: Path, job: VehicleJob, args) -> RenderJobResult:
         else:
             stage = "Blender 执行失败"
         if detail:
-            stage = f"{stage}: {detail}"
+            if "[DECOMPRESS_FAILED]" in detail:
+                source = job.source_dir / job.asset_name
+                stage = (
+                    f"模型文件无法解压: {source}；该 RSC7 文件已损坏、不完整或受资产保护，"
+                    "请更换游戏可读取的未损坏、未加密源文件"
+                )
+            else:
+                stage = f"{stage}: {detail}"
             print(f"[blender-error] {job.model}: {detail}", flush=True)
         message = f"{stage}；完整日志: {job.log_path}"
     status = "success" if rc == 0 else "failed"
@@ -1350,14 +1362,148 @@ def build_model_render_markdown(report: dict[str, object]) -> str:
             "",
             "## 报告文件",
             "",
+            f"- 本次图片表格：{tick}{report['reports']['history_html']}{tick}",
             f"- 本次 Markdown：{tick}{report['reports']['history_markdown']}{tick}",
             f"- 本次 JSON：{tick}{report['reports']['history_json']}{tick}",
-            f"- 最新报告：{tick}{report['reports']['latest_markdown']}{tick}",
+            f"- 最新图片表格：{tick}{report['reports']['latest_html']}{tick}",
+            f"- 最新 Markdown：{tick}{report['reports']['latest_markdown']}{tick}",
             "",
         ]
     )
     return "\n".join(lines)
 
+
+def local_file_uri(value: object) -> str:
+    if not value:
+        return ""
+    try:
+        return Path(str(value)).resolve().as_uri()
+    except (OSError, ValueError):
+        return ""
+
+
+def build_model_render_html(report: dict[str, object]) -> str:
+    summary = report["summary"]
+    status_labels = {
+        "success": "全部成功",
+        "partial_success": "部分成功",
+        "failed": "失败",
+        "skipped_existing": "跳过",
+    }
+    type_labels = {
+        "vehicle": "载具",
+        "weapon": "武器",
+        "accessory": "饰品",
+        "prop": "道具",
+        "drawable": "模型",
+        "drawable-dict": "模型字典",
+        "map": "地图",
+    }
+    rows: list[str] = []
+    for item in report.get("results", []):
+        final_png = item["outputs"]["final_png"]
+        image_uri = local_file_uri(final_png.get("path")) if final_png.get("exists") else ""
+        if image_uri:
+            safe_uri = html.escape(image_uri, quote=True)
+            image_cell = (
+                f'<a href="{safe_uri}"><img src="{safe_uri}" '
+                f'alt="{html.escape(str(item["model"]), quote=True)}" loading="lazy"></a>'
+            )
+            output_name = Path(str(final_png["path"])).name
+            output_cell = f'<a href="{safe_uri}">{html.escape(output_name)}</a>'
+        else:
+            image_cell = '<span class="empty">未生成</span>'
+            output_cell = '<span class="empty">未生成</span>'
+
+        warnings = [str(value) for value in item.get("warnings", []) if value]
+        detail = "；".join(warnings) or str(item.get("message", "")) or "正常"
+        status = str(item.get("status", ""))
+        status_text = status_labels.get(status, status or "未知")
+        status_class = status if status in {"success", "failed", "skipped_existing"} else "other"
+        log_uri = local_file_uri(item.get("blender_log"))
+        log_link = (
+            f' <a class="log-link" href="{html.escape(log_uri, quote=True)}">日志</a>' if log_uri else ""
+        )
+        rows.append(
+            "<tr>"
+            f'<td class="model-name">{html.escape(str(item["model"]))}</td>'
+            f'<td>{html.escape(type_labels.get(str(item["asset_type"]), str(item["asset_type"])))}</td>'
+            f'<td class="preview">{image_cell}</td>'
+            f'<td><span class="status {status_class}">{html.escape(status_text)}</span></td>'
+            f'<td class="path">{output_cell}</td>'
+            f'<td class="detail">{html.escape(detail)}{log_link}</td>'
+            "</tr>"
+        )
+    if not rows:
+        rows.append('<tr><td colspan="6" class="empty-row">本次没有创建渲染任务。</td></tr>')
+
+    report_links = []
+    for label, key in (("Markdown 报告", "latest_markdown"), ("JSON 报告", "latest_json")):
+        uri = local_file_uri(report["reports"].get(key))
+        if uri:
+            report_links.append(f'<a href="{html.escape(uri, quote=True)}">{label}</a>')
+    links_html = " · ".join(report_links)
+    run_status = status_labels.get(str(report["status"]), str(report["status"]))
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型自动截图图片表格</title>
+<style>
+:root {{ color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #20242a; background: #eef1f4; }}
+body {{ margin: 0; padding: 24px; }}
+main {{ max-width: 1500px; margin: 0 auto; }}
+h1 {{ margin: 0 0 8px; font-size: 26px; letter-spacing: 0; }}
+.meta {{ color: #626a73; margin-bottom: 18px; overflow-wrap: anywhere; }}
+.summary {{ display: flex; flex-wrap: wrap; gap: 18px; padding: 14px 16px; margin-bottom: 18px; background: #ffffff; border: 1px solid #d7dce2; border-radius: 6px; }}
+.summary strong {{ color: #111820; }}
+.table-wrap {{ overflow: auto; background: #ffffff; border: 1px solid #cfd5dc; border-radius: 6px; }}
+table {{ width: 100%; min-width: 980px; border-collapse: collapse; }}
+th, td {{ padding: 12px; border-bottom: 1px solid #e1e5e9; text-align: left; vertical-align: middle; }}
+th {{ position: sticky; top: 0; z-index: 1; background: #262d36; color: #ffffff; font-size: 13px; }}
+tr:last-child td {{ border-bottom: 0; }}
+.model-name {{ min-width: 180px; font-weight: 650; }}
+.preview {{ width: 230px; height: 170px; background: #f2f4f6; text-align: center; }}
+.preview img {{ display: block; width: 220px; height: 160px; margin: 0 auto; object-fit: contain; }}
+.path {{ min-width: 180px; overflow-wrap: anywhere; }}
+.detail {{ min-width: 260px; max-width: 520px; color: #4e5660; overflow-wrap: anywhere; }}
+.status {{ display: inline-block; padding: 4px 8px; border-radius: 5px; font-size: 12px; font-weight: 700; }}
+.status.success {{ color: #11643a; background: #dff4e8; }}
+.status.failed {{ color: #9b2525; background: #fbe4e4; }}
+.status.skipped_existing, .status.other {{ color: #6f4d00; background: #fff1cc; }}
+.empty, .empty-row {{ color: #8b929a; }}
+.empty-row {{ padding: 44px; text-align: center; }}
+a {{ color: #0d5eaa; }}
+.log-link {{ white-space: nowrap; }}
+footer {{ margin-top: 14px; color: #68717b; font-size: 13px; }}
+@media (max-width: 720px) {{ body {{ padding: 12px; }} h1 {{ font-size: 22px; }} }}
+</style>
+</head>
+<body>
+<main>
+<h1>模型自动截图图片表格</h1>
+<div class="meta">本次编号：{html.escape(str(report["run_id"]))}<br>输入：{html.escape(str(report["input"]["path"]))}<br>输出：{html.escape(str(report["output"]["path"]))}</div>
+<div class="summary">
+  <span>执行结果 <strong>{html.escape(run_status)}</strong></span>
+  <span>模型 <strong>{summary["jobs"]}</strong></span>
+  <span>成功 <strong>{summary["rendered"]}</strong></span>
+  <span>跳过 <strong>{summary["skipped"]}</strong></span>
+  <span>失败 <strong>{summary["failed"]}</strong></span>
+  <span>贴图警告 <strong>{summary["texture_issues"]}</strong></span>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>模型名</th><th>分类</th><th>对应图片</th><th>状态</th><th>图片文件</th><th>说明</th></tr></thead>
+<tbody>{''.join(rows)}</tbody>
+</table>
+</div>
+<footer>开始：{html.escape(str(report["started_at"]))} · 完成：{html.escape(str(report["finished_at"]))} · 耗时：{float(report["duration_seconds"]):.1f} 秒<br>{links_html}</footer>
+</main>
+</body>
+</html>
+"""
 
 def write_model_render_execution_report(
     *,
@@ -1379,8 +1525,10 @@ def write_model_render_execution_report(
     reports_dir = out_dir / "_reports"
     report_stem = f"model-render-{started_at.strftime('%Y%m%d-%H%M%S')}-{run_id}"
     paths = {
+        "history_html": reports_dir / f"{report_stem}.html",
         "history_markdown": reports_dir / f"{report_stem}.md",
         "history_json": reports_dir / f"{report_stem}.json",
+        "latest_html": out_dir / "_render_gallery.html",
         "latest_markdown": out_dir / "_render_report.md",
         "latest_json": out_dir / "_render_report.json",
     }
@@ -1422,7 +1570,7 @@ def write_model_render_execution_report(
     notes = [
         "渲染器只读取输入资源；截图、日志、任务文件和报告均写入输出目录。",
         "“成功”表示最终 PNG 已生成；画面、构图和材质是否符合预期仍建议人工抽查。",
-        "每次报告永久保存在 _reports；输出根目录的 _render_report.md/.json 会更新为最近一次。",
+        "每次报告永久保存在 _reports；输出根目录的 _render_gallery.html 与 _render_report.md/.json 会更新为最近一次。",
     ]
     if getattr(args, "force", False):
         notes.append("本次启用了强制渲染；同名旧截图会在任务开始前被替换。")
@@ -1441,7 +1589,7 @@ def write_model_render_execution_report(
 
     report: dict[str, object] = {
         "report_type": "model_render_execution",
-        "report_version": 1,
+        "report_version": 2,
         "run_id": run_id,
         "status": status,
         "started_at": started_at.isoformat(timespec="seconds"),
@@ -1473,6 +1621,8 @@ def write_model_render_execution_report(
                 "samples": int(getattr(args, "samples", 0)),
                 "engine": str(getattr(args, "engine", "")),
                 "engine_auto": bool(getattr(args, "engine_auto", False)),
+                "yaw": float(getattr(args, "yaw", 0.0)),
+                "yaw_auto": bool(getattr(args, "yaw_auto", False)),
                 "model_tone": str(getattr(args, "model_tone", "")),
                 "cutout": bool(getattr(args, "cutout", False)),
                 "perspective": bool(getattr(args, "perspective", False)),
@@ -1516,10 +1666,13 @@ def write_model_render_execution_report(
     }
     json_text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
     markdown_text = build_model_render_markdown(report)
+    html_text = build_model_render_html(report)
     atomic_write_text(paths["history_json"], json_text)
     atomic_write_text(paths["history_markdown"], markdown_text)
+    atomic_write_text(paths["history_html"], html_text)
     atomic_write_text(paths["latest_json"], json_text)
     atomic_write_text(paths["latest_markdown"], markdown_text)
+    atomic_write_text(paths["latest_html"], html_text)
     return paths
 
 
@@ -1529,8 +1682,10 @@ def emit_model_render_execution_report(**kwargs) -> dict[str, Path] | None:
     except Exception as exc:
         print(f"[report-error] 无法生成模型执行报告: {exc}", file=sys.stderr, flush=True)
         return None
+    print(f"[report] html={paths['latest_html']}", flush=True)
     print(f"[report] markdown={paths['latest_markdown']}", flush=True)
     print(f"[report] json={paths['latest_json']}", flush=True)
+    print(f"[report] history-html={paths['history_html']}", flush=True)
     print(f"[report] history={paths['history_markdown']}", flush=True)
     return paths
 
@@ -1665,7 +1820,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cutout-width", type=int, default=0, help="Minimum cropped PNG width. Upscales only; 0 keeps native size.")
     parser.add_argument("--cutout-height", type=int, default=0, help="Minimum cropped PNG height. Upscales only; 0 keeps native size.")
     parser.add_argument("--perspective", action="store_true", help="Use perspective camera instead of orthographic.")
-    parser.add_argument("--ytd-mode", choices=("all", "match", "none"), default="all")
+    parser.add_argument(
+        "--ytd-mode",
+        choices=("all", "match", "none"),
+        default="match",
+        help="YTD selection. Default match loads only the model dictionary and delimiter-suffixed companions.",
+    )
     parser.add_argument("--shared-ytd", action="append", default=[], help="Extra shared .ytd file or folder, for example exported vehshare.ytd.")
     parser.add_argument("--no-auto-shared-ytd", action="store_true", help="Do not auto-scan input/shared_ytd for vehshare*.ytd.")
     parser.add_argument("--skip-textures", action="store_true", help="Do not extract or bind .ytd textures.")

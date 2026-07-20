@@ -117,9 +117,11 @@ _vehicle_renders/
   _logs/model.textures.bind.json
   _texture_report.txt
   _texture_report.json
+  _render_gallery.html         # Latest model-name/image table
   _render_report.md            # Latest human-readable execution report
   _render_report.json          # Latest machine-readable execution report
-  _reports/model-render-*.md   # Preserved report for every run
+  _reports/model-render-*.html # Preserved image table for every run
+  _reports/model-render-*.md
   _reports/model-render-*.json
 ```
 
@@ -127,9 +129,11 @@ _vehicle_renders/
 
 ## Per-run execution report
 
-Every batch run writes a model-rendering-specific Markdown report and JSON report. The report records the input and output paths, requested render/cutout/texture settings, archive and RPF preprocessing, Blender/Python environment, and the exact status, elapsed time, screenshot artifacts, texture findings, error, and log path for every model.
+Every batch run writes an HTML model-name/image table plus Markdown and JSON execution reports. The reports record the input and output paths, requested render/cutout/texture settings, archive and RPF preprocessing, Blender/Python environment, and the exact status, elapsed time, screenshot artifacts, texture findings, error, and log path for every model.
 
-Reports under `_reports` are never overwritten. `_render_report.md` and `_render_report.json` are refreshed as the latest-report shortcuts. Expected failures such as no matching assets and low output-disk space also produce a failure report once the output directory is available. `_texture_report.*` remains the detailed texture sub-report and is linked from the execution report.
+Reports under `_reports` are never overwritten. `_render_gallery.html`, `_render_report.md`, and `_render_report.json` are refreshed as latest-report shortcuts. Expected failures such as no matching assets and low output-disk space also produce a failure report once the output directory is available. `_texture_report.*` remains the detailed texture sub-report and is linked from the execution report.
+
+The default `--ytd-mode match` loads the model's exact YTD and delimiter-suffixed companion dictionaries. This prevents numbered models such as `model2` from accidentally loading `model20` through `model29`; use `--ytd-mode all` only when a resource intentionally shares every local dictionary.
 
 ## 贴图报告
 
@@ -160,6 +164,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 --model-tone white
 --no-special-lights
 --key-padding 0
+--ytd-mode match
 ```
 
 未传 `--yaw` 时，带同名 YCD 动画的饰品姿态模型使用 155 度正面特写，普通饰品和其他模型保持 135 度；显式传入 `--yaw` 会覆盖自动值。
