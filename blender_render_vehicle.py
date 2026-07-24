@@ -1,8 +1,10 @@
+import importlib
 import json
 import math
 import os
 import re
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -67,6 +69,8 @@ VEHICLE_BODY_PAINT_LAYERS = {1, 2, 3}
 GREEN_SCREEN_COLOR = (0.0, 1.0, 0.0)
 PNG_ALPHA_HALF_STEP = 0.5 / 255.0
 MIN_PROJECTED_ORTHO_SCALE = 0.0001
+SOLLUMZ_DEPENDENCY_LOCK_TIMEOUT = 300.0
+SOLLUMZ_DEPENDENCY_LOCK_STALE = 300.0
 
 
 def apply_model_tone(job):
@@ -129,6 +133,104 @@ def missing_sollumz_runtime_features():
     return missing
 
 
+def missing_sollumz_dependencies(dependencies):
+    states = dependencies.dependencies_available_state()
+    missing = []
+    for dependency in dependencies.DEPENDENCIES:
+        if not dependency.supported:
+            continue
+        state = states.get(dependency.name)
+        state_name = getattr(state, "name", str(state) if state is not None else "UNKNOWN")
+        if state_name != "INSTALLED":
+            missing.append((dependency.name, state_name))
+    return missing
+
+
+def refresh_sollumz_dependencies(dependencies):
+    importlib.invalidate_caches()
+    try:
+        dependencies.unmount_dependencies()
+    except Exception:
+        pass
+    dependencies.mount_dependencies()
+    return missing_sollumz_dependencies(dependencies)
+
+
+def ensure_sollumz_dependencies(module_name):
+    module = importlib.import_module(module_name)
+    dependencies = getattr(module, "dependencies", None)
+    if dependencies is None:
+        raise RuntimeError(f"{module_name} does not expose its dependency manager")
+
+    dependencies.mount_dependencies()
+    missing = missing_sollumz_dependencies(dependencies)
+    if not missing:
+        return
+
+    data_root = Path(dependencies.requirements_path()).resolve().parent
+    data_root.mkdir(parents=True, exist_ok=True)
+    lock_path = data_root / ".ck-dependency-install.lock"
+    deadline = time.monotonic() + SOLLUMZ_DEPENDENCY_LOCK_TIMEOUT
+    owns_lock = False
+    waiting_logged = False
+
+    while missing:
+        try:
+            lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(lock_fd, f"pid={os.getpid()} time={time.time()}\n".encode("ascii"))
+            finally:
+                os.close(lock_fd)
+            owns_lock = True
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock_path.stat().st_mtime > SOLLUMZ_DEPENDENCY_LOCK_STALE:
+                    lock_path.unlink()
+                    continue
+            except FileNotFoundError:
+                continue
+
+            if time.monotonic() >= deadline:
+                details = ", ".join(f"{name}={state}" for name, state in missing)
+                raise RuntimeError(f"Timed out waiting for Sollumz dependencies: {details}")
+            if not waiting_logged:
+                print("Waiting for another Blender worker to install Sollumz dependencies...")
+                waiting_logged = True
+            time.sleep(1.0)
+            missing = refresh_sollumz_dependencies(dependencies)
+
+    if not owns_lock:
+        return
+
+    try:
+        # Binary GTA assets require PyMateria in addition to the required szio package.
+        optional = {
+            dependency.name
+            for dependency in dependencies.DEPENDENCIES_OPTIONAL
+            if dependency.supported
+        }
+        details = ", ".join(f"{name}={state}" for name, state in missing)
+        print(f"Sollumz dependencies missing for Python {sys.version_info.major}.{sys.version_info.minor}: {details}")
+        print("Installing pinned Sollumz dependencies with hash verification...")
+        if not dependencies.install_dependencies(
+            online_access_override=True,
+            optional_dependencies_to_install=optional,
+        ):
+            raise RuntimeError("Sollumz dependency installer returned a failure status")
+
+        missing = refresh_sollumz_dependencies(dependencies)
+        if missing:
+            details = ", ".join(f"{name}={state}" for name, state in missing)
+            raise RuntimeError(f"Sollumz dependencies remain incomplete after installation: {details}")
+        print("Sollumz dependencies installed and mounted")
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def ensure_sollumz(job):
     missing = missing_sollumz_runtime_features()
     if not missing:
@@ -158,6 +260,15 @@ def ensure_sollumz(job):
     errors = []
     for module_name in dict.fromkeys(module_names):
         try:
+            try:
+                _, enabled = addon_utils.check(module_name)
+            except Exception:
+                enabled = False
+            if enabled:
+                print(f"Reloading incomplete Sollumz runtime: {module_name}")
+                addon_utils.disable(module_name, default_set=False)
+
+            ensure_sollumz_dependencies(module_name)
             # Blender 5.0 only creates the AddonPreferences entry before
             # register() when default_set is true. Sollumz reads that entry
             # during registration, so a transient enable leaves it half loaded.
