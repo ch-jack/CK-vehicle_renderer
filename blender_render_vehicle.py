@@ -1637,29 +1637,7 @@ def replace_socket_link(material_obj, source, target):
     return True
 
 
-def weapon_image_average_luminance(image):
-    if image is None:
-        return 0.0
-    try:
-        pixels = image.pixels
-        channels = max(int(image.channels), 1)
-        pixel_count = len(pixels) // channels
-        step = max(pixel_count // 2048, 1)
-        total = 0.0
-        count = 0
-        for index in range(0, pixel_count, step):
-            offset = index * channels
-            red = float(pixels[offset])
-            green = float(pixels[offset + min(1, channels - 1)])
-            blue = float(pixels[offset + min(2, channels - 1)])
-            total += red * 0.2126 + green * 0.7152 + blue * 0.0722
-            count += 1
-        return total / max(count, 1)
-    except Exception:
-        return 0.0
-
-
-def tint_bright_weapon_palette_preview(material_obj, bsdf, color_node):
+def restore_weapon_diffuse_preview(material_obj, bsdf, color_node):
     base = bsdf.inputs.get("Base Color")
     if base is None or not base.is_linked or color_node is None:
         return None
@@ -1669,53 +1647,13 @@ def tint_bright_weapon_palette_preview(material_obj, bsdf, color_node):
     source_image = getattr(source_link.from_node, "image", None)
     if source_image is not None and weapon_texture_role(source_image.name) == "palette":
         return None
-
-    luminance = weapon_image_average_luminance(getattr(color_node, "image", None))
-    if luminance <= 0.18:
+    color_image = getattr(color_node, "image", None)
+    color_output = color_node.outputs.get("Color")
+    if color_image is None or weapon_texture_role(color_image.name) != "color" or color_output is None:
         return None
-    factor = max(0.14, min(0.32, 0.045 / luminance))
+    replace_socket_link(material_obj, color_output, base)
+    return normalized_texture_name(color_image.name)
 
-    nodes = material_obj.node_tree.nodes
-    multiply = nodes.get("vehicle_renderer_weapon_palette_tint")
-    if multiply is None:
-        multiply = nodes.new("ShaderNodeMixRGB")
-        multiply.name = "vehicle_renderer_weapon_palette_tint"
-        multiply.blend_type = "MULTIPLY"
-    desaturate = nodes.get("vehicle_renderer_weapon_palette_desaturate")
-    if desaturate is None:
-        desaturate = nodes.new("ShaderNodeHueSaturation")
-        desaturate.name = "vehicle_renderer_weapon_palette_desaturate"
-    desaturate.inputs["Saturation"].default_value = 0.08
-    desaturate.inputs["Value"].default_value = 0.72
-    multiply.inputs[0].default_value = 1.0
-    multiply.inputs[2].default_value = (factor, factor, factor, 1.0)
-    replace_socket_link(material_obj, source_link.from_socket, desaturate.inputs["Color"])
-    replace_socket_link(material_obj, desaturate.outputs["Color"], multiply.inputs[1])
-    replace_socket_link(material_obj, multiply.outputs["Color"], base)
-    return factor
-
-def finalize_weapon_palette_materials():
-    if ASSET_KIND != "weapon":
-        return 0
-    changed = 0
-    for material_obj in used_mesh_materials():
-        if not material_obj.node_tree:
-            continue
-        if material_obj.node_tree.nodes.get("vehicle_renderer_weapon_palette_tint") is None:
-            continue
-        for bsdf in material_obj.node_tree.nodes:
-            if bsdf.bl_idname != "ShaderNodeBsdfPrincipled":
-                continue
-            force_input(bsdf, "Roughness", 0.44)
-            force_input(bsdf, "Metallic", 0.0)
-            force_input(bsdf, "Specular IOR Level", 0.22)
-            force_input(bsdf, "Specular", 0.22)
-            force_input(bsdf, "Coat Weight", 0.04)
-            force_input(bsdf, "Coat Roughness", 0.28)
-            changed += 1
-    if changed:
-        print(f"Weapon palette surfaces finalized: {changed}")
-    return changed
 
 def bind_weapon_pbr_materials(texture_index, texture_manifest):
     local_texture_names = texture_manifest.get("local", set())
@@ -1741,18 +1679,19 @@ def bind_weapon_pbr_materials(texture_index, texture_manifest):
                 material_obj, local_texture_names, "color", "DiffuseSampler"
             )
             if base_color_has_upstream_texture(node) and not base_color_uses_palette_texture(node):
-                tint_factor = tint_bright_weapon_palette_preview(
+                restored_texture = restore_weapon_diffuse_preview(
                     material_obj, node, color_node
                 )
-                if tint_factor is not None:
-                    names.append(f"{material_obj.name}:palette-tint={tint_factor:.3f}")
+                if restored_texture is not None:
+                    linked += 1
+                    names.append(f"{material_obj.name}->{restored_texture}")
                 continue
             if link_image_to_base_color(material_obj, node, image, texture_path.stem):
                 linked += 1
                 names.append(material_obj.name)
     if linked:
-        print(f"Weapon fallback texture linked: {texture_path.stem} -> {linked}")
-        print("Weapon fallback materials: " + ", ".join(names[:24]))
+        print(f"Weapon diffuse texture linked: {texture_path.stem} -> {linked}")
+        print("Weapon diffuse materials: " + ", ".join(names[:24]))
     else:
         print("Weapon native materials preserved")
     return linked
@@ -3341,7 +3280,6 @@ def main():
     bake_sollumz_shader_parameters()
     accessory_normal_tunes = tune_accessory_normal_maps()
     print(f"Accessory normal maps tuned: {accessory_normal_tunes}")
-    finalize_weapon_palette_materials()
     overlay_tunes = tune_effect_overlay_materials()
     print(f"Effect overlays finalized after shader bake: {overlay_tunes}")
     wheels_created = mirror_missing_wheels() if job.get("asset_kind", "vehicle") == "vehicle" else 0

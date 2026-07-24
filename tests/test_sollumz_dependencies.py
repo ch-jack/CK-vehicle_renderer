@@ -118,5 +118,84 @@ class SollumzDependencyTests(unittest.TestCase):
             self.assertEqual([], RENDERER.missing_sollumz_dependencies(dependencies))
 
 
+class FakeSocket:
+    def __init__(self, node, name):
+        self.node = node
+        self.name = name
+        self.links = []
+
+    @property
+    def is_linked(self):
+        return bool(self.links)
+
+
+class FakeNode:
+    def __init__(self, name, image_name=None):
+        self.name = name
+        self.image = types.SimpleNamespace(name=image_name) if image_name else None
+        self.outputs = {"Color": FakeSocket(self, "Color")}
+
+
+class FakeLink:
+    def __init__(self, source, target):
+        self.from_node = source.node
+        self.from_socket = source
+        self.to_socket = target
+
+
+class FakeLinks:
+    def remove(self, link):
+        link.to_socket.links.remove(link)
+
+    def new(self, source, target):
+        link = FakeLink(source, target)
+        target.links.append(link)
+        return link
+
+
+class WeaponDiffusePreviewTests(unittest.TestCase):
+    def make_graph(self, source_name, source_image_name, diffuse_image_name="w_ar_meigui.png"):
+        source_node = FakeNode(source_name, source_image_name)
+        diffuse_node = FakeNode("DiffuseSampler", diffuse_image_name)
+        base = FakeSocket(None, "Base Color")
+        links = FakeLinks()
+        links.new(source_node.outputs["Color"], base)
+        material = types.SimpleNamespace(
+            node_tree=types.SimpleNamespace(links=links)
+        )
+        bsdf = types.SimpleNamespace(inputs={"Base Color": base})
+        return material, bsdf, base, source_node, diffuse_node
+
+    def test_restores_color_diffuse_when_diffpal_sampler_uses_color_image(self):
+        material, bsdf, base, _, diffuse_node = self.make_graph(
+            "TextureSamplerDiffPal", "w_ar_meigui.png"
+        )
+
+        restored = RENDERER.restore_weapon_diffuse_preview(material, bsdf, diffuse_node)
+
+        self.assertEqual("w_ar_meigui", restored)
+        self.assertIs(diffuse_node, base.links[0].from_node)
+        self.assertIs(diffuse_node.outputs["Color"], base.links[0].from_socket)
+
+    def test_keeps_real_palette_texture_connected(self):
+        material, bsdf, base, source_node, diffuse_node = self.make_graph(
+            "TextureSamplerDiffPal", "w_ar_meigui_dpal.png"
+        )
+
+        restored = RENDERER.restore_weapon_diffuse_preview(material, bsdf, diffuse_node)
+
+        self.assertIsNone(restored)
+        self.assertIs(source_node, base.links[0].from_node)
+
+    def test_ignores_regular_diffuse_connection(self):
+        material, bsdf, base, source_node, diffuse_node = self.make_graph(
+            "DiffuseSampler", "w_ar_meigui.png"
+        )
+
+        restored = RENDERER.restore_weapon_diffuse_preview(material, bsdf, diffuse_node)
+
+        self.assertIsNone(restored)
+        self.assertIs(source_node, base.links[0].from_node)
+
 if __name__ == "__main__":
     unittest.main()

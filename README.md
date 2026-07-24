@@ -171,7 +171,7 @@ note: no local YTD textures were extracted; add the correct .ytd next to the mod
 
 `--model-tone black` 是默认值；`gray/white/black` 都只调整模型原生主色、副色、珠光和明确的车漆材质，不覆盖或暗化漫反射贴图。玻璃、灯光、轮胎、轮毂、金属、碳纤维、塑料、内饰和贴花不参与改色。
 
-Cycles 渲染前会把 Sollumz 数值参数烘焙为标准 Blender 节点常量，已有 Base Color 上游贴图链不会被补图逻辑覆盖。武器材质若把 `_dpal` / palette / tint 调色板误接到 Base Color，会改用本地漫反射贴图（例如 `map.png`）；`_nm` / `_spec` 按 Non-Color 数据读取。
+Cycles 渲染前会把 Sollumz 数值参数烘焙为标准 Blender 节点常量，已有 Base Color 上游贴图链不会被补图逻辑覆盖。武器材质若由 `TextureSamplerDiffPal` 把普通彩色贴图误接到 Base Color，会直接恢复本地漫反射贴图并保留原始颜色；真正的 `_dpal` / palette / tint 调色板仍走原有处理分支，`_nm` / `_spec` 按 Non-Color 数据读取。
 
 `--key-padding 0`（默认）等同 Photoshop“裁切透明像素”；大于 0 时才会在透明 PNG 周围增加指定像素留边。`_alpha` 始终保留 `--width/--height` 完整画布。
 `--cutout-width/--cutout-height` 设置根目录裁切 PNG 的最小分辨率；任一边不足时等比放大，已达到尺寸时不缩小。`_alpha` 和 `_greenscreen` 仍保持渲染画布分辨率。
